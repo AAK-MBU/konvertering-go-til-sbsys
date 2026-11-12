@@ -1,0 +1,5 @@
+liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+boelge;PPR;PPR;ppr;PPR-sag;map;Cases.Organisering. Ét område, én bølge;;
+boelge;BOR;Borgersager;borgersager;Borgersager;map;Cases.Organisering. Egen bølge siden 11-11-2026;;
+boelge;EMN;Emnesager;emnesager;Emnesager;map;Cases.Organisering. Egen bølge siden 11-11-2026;;
+boelge;ELM;Digitale mapper;;;map;Cases.Organisering. Dækker SEKS bølger — afgøres af enheden i boelge_enhed.csv, ikke her. Lad feltet stå tomt;;

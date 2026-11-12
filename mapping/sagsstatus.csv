@@ -1,0 +1,4 @@
+liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+sagsstatus;Active;Aktiv;1;Aktiv;map;;;
+sagsstatus;Closed;Afsluttet;3;Afsluttet;map;;;
+sagsstatus;Draft;Kladde;;;ignorer;Kladder konverteres ikke;;

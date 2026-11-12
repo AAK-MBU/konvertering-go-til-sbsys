@@ -1,0 +1,66 @@
+[project]
+name = "go-til-sbsys"
+version = "0.1.0"
+description = "Konvertering af sager, dokumenter, parter og notater fra GetOrganized til SBSYS"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.14.2",
+    "pyodbc>=5.3.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Installeres kun på Automation Server-workere.
+#
+# Markøren ` ; python_version >= '3.13'` er ikke pynt. Uden den fejler
+# `uv sync` på enhver maskine med Python 3.11 eller 3.12 — også selv om man
+# slet ikke beder om denne extra. uv løser nemlig alle extras under ét, og
+# automation-server-client 0.3.0 kræver Python >= 3.13.
+#
+# Konsekvens: Automation Server-workeren SKAL køre Python 3.13 eller nyere.
+# Gør den ikke det, installeres klienten ikke, og automation/main.py fejler
+# ved import. Det er bevidst — hellere en tydelig fejl ved opstart end en
+# tavs én midt i en bølgekørsel.
+automation = [
+    "automation-server-client @ git+https://github.com/odense-rpa/automation-server-client.git ; python_version >= '3.13'",
+]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.3",
+    "mypy>=2.4.1",
+]
+
+[project.scripts]
+konv = "konvertering.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/konvertering"]
+
+# automation-server-client hentes fra git og er dermed en "direct reference".
+# Hatchling afviser dem som standard, og så fejler selve byggeriet af pakken
+# uanset Python-version.
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+disallow_untyped_defs = false

@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+rapporter/*.csv
+sbsys/endpoints.toml
+.pytest_cache/
+.ruff_cache/
+
+docs/

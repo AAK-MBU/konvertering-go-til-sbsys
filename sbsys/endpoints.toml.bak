@@ -1,0 +1,151 @@
+# Stier og feltnavne for SBSYS' API.
+#
+# Kopiér til sbsys/endpoints.toml og ret til efter JERES snitfladebeskrivelse
+# og SBSYS-version. Filen er bevidst holdt uden for koden, så en sti kan
+# rettes i test uden en ny release — og så to miljøer kan køre forskellige
+# API-versioner samtidig i en overgangsperiode.
+#
+# Stierne herunder er ikke længere gæt: de kommer fra AAK-MBU/api-sbsys-client,
+# kommunens egen delte SBSYS-klient. Mærkningen er pakkens egen:
+#
+#   [v]  verificeret mod testmiljøet
+#   [k]  brugt af klienten, men ikke bekræftet mod specifikationen
+#
+# Revidér dem mod SBSYS' eget OpenAPI-dokument før en bølge køres. Klienten
+# har et værktøj til det:  uv run python scripts/endpoints.py --check
+
+# Livstegn. /api/version findes IKKE i SBSYS — statuslisten er det billigste
+# rigtige kald at bruge i stedet.
+[operationer.hent_version]                      # [k]
+metode = "GET"
+sti = "/api/sag/sagStatusList"
+forventede_status = [200]
+
+# Søgning er en POST med kriterierne i kroppen; en GET giver 405. Paging-
+# felterne SKAL med, ellers afvises kaldet. Kommunens klient sender
+# kriterierne i roden — derfor ingen indpakning. Kræver jeres version et
+# omsluttende objekt, så sæt indpak = "Query" eller hvad det nu hedder.
+[soegning]
+indpak = ""
+side_felt = "PageNumber"
+side_stoerrelse_felt = "PageSize"
+side_stoerrelse = 100
+resultat_felt = "Results"
+
+[operationer.soeg_sag]                          # [v]
+metode = "POST"
+sti = "/api/sag/search"
+forventede_status = [200, 204, 404]
+
+[operationer.hent_sag]                          # [v]
+metode = "GET"
+sti = "/api/sag/{sag_id}"
+forventede_status = [200]
+
+# VIGTIGT: sager oprettes FRA EN SKABELON. Der findes ikke et felt-for-felt
+# POST /api/sag, og det ændrer sagsmodellen — se docs/08-sbsys-klient.md og
+# spørgsmål A15. Kroppen klienten sender er:
+#   {"SagsTitel", "SkabelonId", "SagsBehandlerID", "PrimaryPart", "Parts"}
+[operationer.opret_sag]                         # [k]
+metode = "POST"
+sti = "/api/sag/template"
+forventede_status = [200, 201]
+
+# SBSYS kan kun opdatere en sag ved at erstatte HELE sagen. Hent den først,
+# læg ændringerne ovenpå, send den tilbage. En ændring en anden laver
+# imellem de to kald bliver overskrevet.
+[operationer.opdater_sag]                       # [k]
+metode = "PUT"
+sti = "/api/sag/{sag_id}"
+forventede_status = [200, 204]
+
+# Dokument og fil er ÉT multipart-kald, ikke to: filen i "file", metadata
+# som JSON i feltet "json" ({"SagID": …, "DokumentNavn": …}).
+[operationer.journaliser]                       # [k]
+metode = "POST"
+sti = "/api/dokument/journaliser"
+forventede_status = [200, 201]
+
+[operationer.hent_dokumenter]                   # [k]
+metode = "GET"
+sti = "/api/sag/{sag_id}/dokumenter"
+forventede_status = [200]
+
+# Part-opslag. Sagsoprettelse kræver SBSYS' interne PartId — ikke et
+# CPR-nummer — så opslaget her er første kald i enhver sagsoprettelse.
+[operationer.soeg_person]                       # [k]
+metode = "POST"
+sti = "/api/person/search"
+forventede_status = [200]
+
+[operationer.soeg_firma]                        # [k]
+metode = "POST"
+sti = "/api/firma/search"
+forventede_status = [200]
+
+[operationer.tilknyt_part]                      # [k]
+metode = "POST"
+sti = "/api/sag/{sag_id}/part"
+forventede_status = [200, 201, 204]
+
+# Sagsbehandlere slås op på LogonId (initialer), ikke på navn.
+[operationer.soeg_bruger]                       # [k]
+metode = "POST"
+sti = "/api/bruger/search"
+forventede_status = [200]
+
+[operationer.hent_skabeloner]                   # [k]
+metode = "GET"
+sti = "/api/sagsskabelon"
+forventede_status = [200]
+
+[operationer.opret_notat]                       # [k]
+metode = "POST"
+sti = "/api/journalarknote/create"
+forventede_status = [200, 201]
+
+# Kanonisk feltnavn = SBSYS' feltnavn.
+#
+# Felterne herunder er IKKE verificeret. Klientens egne modeller bruger
+# SagsTitel ved søgning og oprettelse, og Titel ved læsning — samme felt,
+# to navne, afhængigt af endpoint.
+[felter.sag]
+titel = "SagsTitel"
+beskrivelse = "Beskrivelse"
+kle = "SagsNummer"
+facet = "Facet"
+sagstype = "SagsTypeId"
+status = "SagsStatusId"
+ansvarlig = "SagsBehandlerID"
+# Punktum = indlejret objekt. Bekraeftet 02-11-2026: SBSYS peger paa
+# ansaettelsesstedet ved reference ({AnsaettelsesstedId, ExternalKey}),
+# ikke ved en flad vaerdi. Vaerdien i mapping/afdeling.csv skal derfor
+# vaere ansaettelsesstedets ExternalKey — hent listen med
+#   uv run konv opslag afdelinger
+# Bruger I id i stedet, saa skriv: afdeling = "Ansaettelsessted.AnsaettelsesstedId"
+afdeling = "Ansaettelsessted.AnsaettelsesstedId"
+# Sager oprettes fra en skabelon; mapping/sagsskabelon.csv skal give id'et.
+#   uv run konv opslag skabeloner
+skabelon = "SkabelonId"
+oprettet_dato = "SagsDato"
+afsluttet_dato = "Afsluttetdato"
+# Kritisk felt: her skrives "GO:<kilde_noegle>" ind, så en sag kan
+# genfindes hvis id_map og SBSYS kommer ud af trit.
+#
+# Bekræftet 02-11-2026 mod Aarhus' testmiljø: SagSearchCriteria og
+# SagSearchQueryV29 har begge EksternSagId — så der KAN søges. Hvor
+# værdien skrives er endnu ikke fundet; se A17 og overvej SagsFelter
+# (nøgle/værdi, søgbare via SagsFeltIndhold) som alternativ.
+ekstern_noegle = "EksternSagId"
+
+[felter.dokument]
+titel = "DokumentNavn"
+kategori = "DokumentTypeId"
+dokument_dato = "DokumentDato"
+retning = "Kategori"
+forfatter = "OprettetAfId"
+# LØST for dokumenter, 02-11-2026: journaliseringen tager "Eksternid"
+# (JournaliserDokumentInputDtoV10), og DokumentSearchDtoV29 søger på
+# "EksternId". Samme felt, to stavemåder — SBSYS er ikke konsekvent.
+# Her skrives værdien, så det er journaliseringens stavemåde der gælder.
+ekstern_noegle = "Eksternid"
