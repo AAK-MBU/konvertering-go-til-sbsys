@@ -13,7 +13,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 log = logging.getLogger(__name__)
 
@@ -61,14 +61,23 @@ def _bu_base_url() -> str | None:
 _SANDT = {"1", "true", "ja", "yes", "on"}
 _FALSK = {"0", "false", "nej", "no", "off"}
 
+# SBSYS_VERIFY=system: verificér mod OPERATIVSYSTEMETS certifikatlager (via
+# pakken truststore) i stedet for Pythons eget. På en kommunal Windows-pc
+# ligger kommunens rod-CA der i forvejen, udrullet af IT — så der skal ikke
+# eksporteres en .pem. På en server er det maskinens eget lager der tæller,
+# og ligger CA'en ikke dér, skal stien til en .pem bruges i stedet.
+SYSTEMETS_LAGER = "system"
+_SYSTEM = {"system", "os", "windows"}
+
 
 def tls_verifikation() -> bool | str:
-    """Læs SBSYS_VERIFY: til, fra, eller en sti til et CA-bundt.
+    """Læs SBSYS_VERIFY: til, fra, systemets lager, eller en sti til et CA-bundt.
 
-    De tre former findes, fordi de tre situationer findes. Internt
-    testmiljø med kommunens egen CA er det normale, og det løses med en sti
-    — ikke ved at slå verifikationen fra. ``SBSYS_VERIFICER_TLS`` virker
-    stadig som det gamle navn, men SBSYS_VERIFY vinder.
+    Formerne findes, fordi situationerne findes. Internt testmiljø med
+    kommunens egen CA er det normale. På en kommunal pc løses det enklest
+    med ``system``; ellers med en sti — ikke ved at slå verifikationen fra.
+    ``SBSYS_VERIFICER_TLS`` virker stadig som det gamle navn, men
+    SBSYS_VERIFY vinder.
     """
     raa = os.environ.get("SBSYS_VERIFY")
     if raa is None:
@@ -81,6 +90,8 @@ def tls_verifikation() -> bool | str:
         return True
     if raa.lower() in _FALSK:
         return False
+    if raa.lower() in _SYSTEM:
+        return SYSTEMETS_LAGER
 
     # Alt andet er en sti. At kontrollere den HER er pointen: en stavefejl
     # giver ellers nøjagtig samme SSL-fejl som et manglende certifikat, og
@@ -95,6 +106,22 @@ def tls_verifikation() -> bool | str:
     if sti.is_file() and sti.stat().st_size == 0:
         raise KonfigurationsFejl(f"CA-bundtet {sti} er tomt")
     return str(sti)
+
+
+def httpx_verify(verificer_tls: bool | str) -> Any:
+    """Oversæt indstillingen til det httpx' ``verify`` forventer.
+
+    ``system`` bliver til en SSLContext fra truststore, der spørger
+    operativsystemets certifikatlager. Resten gives videre som det er:
+    True/False, eller stien til et CA-bundt.
+    """
+    if verificer_tls == SYSTEMETS_LAGER:
+        import ssl
+
+        import truststore
+
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    return verificer_tls
 
 
 @dataclass(frozen=True)
@@ -169,17 +196,22 @@ class SbsysIndstillinger:
     maks_forsoeg: int = 5
     maks_samtidige: int = 4
     kald_pr_sekund: float = 8.0
-    # True = verificér mod systemets CA-lager. En sti = verificér mod netop
-    # det CA-bundt (kommunens egen rod-CA). False = verificér ikke; afvises
-    # i produktion. Værdien gives direkte videre til httpx' verify.
+    # True = verificér mod Pythons eget CA-lager (certifi). "system" =
+    # operativsystemets lager via truststore. En sti = netop det CA-bundt
+    # (kommunens egen rod-CA). False = verificér ikke; afvises i
+    # produktion. Oversættes til httpx' verify af httpx_verify().
     verificer_tls: bool | str = True
 
     @property
     def tls_beskrivelse(self) -> str:
         if self.verificer_tls is True:
-            return "systemets CA-lager"
+            # Pythons eget lager (certifi) — IKKE Windows'. Kommunens egen
+            # rod-CA er ikke i det, så et internt testmiljø fejler her.
+            return "Pythons eget CA-lager (certifi)"
         if self.verificer_tls is False:
             return "SLÅET FRA — forbindelsen er ikke beskyttet mod aflytning"
+        if self.verificer_tls == SYSTEMETS_LAGER:
+            return "operativsystemets certifikatlager (truststore)"
         return f"CA-bundt: {self.verificer_tls}"
 
     @property

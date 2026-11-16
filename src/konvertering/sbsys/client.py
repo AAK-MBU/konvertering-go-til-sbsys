@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from ..config import SbsysIndstillinger
+from ..config import SbsysIndstillinger, httpx_verify
 from .auth import BrugerAdgangskode, ClientCredentials, StatiskToken, TokenUdbyder
 from .errors import (
     AutentifikationsFejl,
@@ -88,7 +88,7 @@ class SbsysKlient:
         self._klient = httpx.Client(
             base_url=indstillinger.base_url,
             timeout=indstillinger.timeout_sekunder,
-            verify=indstillinger.verificer_tls,
+            verify=httpx_verify(indstillinger.verificer_tls),
             transport=transport,
             follow_redirects=False,
         )

@@ -95,13 +95,15 @@ def raad_om_certifikat(vaert: str) -> str:
     først, nødudgangen sidst — og med dens pris nævnt.
     """
     return (
-        f"Certifikatet på {vaert} kunne ikke verificeres. Tre udveje, i den "
+        f"Certifikatet på {vaert} kunne ikke verificeres. Udvejene, i den "
         f"rækkefølge:\n"
-        f"  1. Peg på kommunens rod-CA: SBSYS_VERIFY=C:/sti/til/ca.pem\n"
+        f"  1. Brug maskinens eget certifikatlager: SBSYS_VERIFY=system\n"
+        f"     (på en kommunal pc ligger kommunens rod-CA der i forvejen)\n"
+        f"  2. Peg på kommunens rod-CA: SBSYS_VERIFY=C:/sti/til/ca.pem\n"
         f"     (eksportér kæden fra browseren som Base-64 .cer og saml dem i "
         f"én .pem-fil)\n"
-        f"  2. Få et certifikat på serveren der kan verificeres\n"
-        f"  3. Kun i test: SBSYS_VERIFY=0 slår verifikationen fra. Så kan "
+        f"  3. Få et certifikat på serveren der kan verificeres\n"
+        f"  4. Kun i test: SBSYS_VERIFY=0 slår verifikationen fra. Så kan "
         f"forbindelsen aflyttes og ændres undervejs, og persondata om børn og "
         f"unge passerer den. Afvises i produktion."
     )

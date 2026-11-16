@@ -29,6 +29,7 @@ from typing import Protocol
 
 import httpx
 
+from ..config import httpx_verify
 from .errors import AutentifikationsFejl, er_certifikatfejl, raad_om_certifikat
 
 log = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ class TokenEndpoint:
         client_id: str,
         client_secret: str | None = None,
         scope: str | None = None,
-        verificer_tls: bool = True,
+        verificer_tls: bool | str = True,
         timeout: float = 30.0,
     ) -> None:
         self._token_url = token_url
@@ -99,7 +100,7 @@ class TokenEndpoint:
                 self._token_url,
                 data=data,
                 timeout=self._timeout,
-                verify=self._verificer_tls,
+                verify=httpx_verify(self._verificer_tls),
             )
         except httpx.HTTPError as e:
             if er_certifikatfejl(e):
@@ -153,7 +154,7 @@ class BrugerAdgangskode(TokenEndpoint):
         kodeord: str,
         client_secret: str | None = None,
         scope: str | None = None,
-        verificer_tls: bool = True,
+        verificer_tls: bool | str = True,
         timeout: float = 30.0,
     ) -> None:
         super().__init__(token_url, client_id, client_secret, scope, verificer_tls, timeout)
