@@ -49,6 +49,11 @@ USING (VALUES
     ('kle',      N'17.01.05', N'17.01.05', 'map'),
     ('kle',      N'27.24.03', N'27.24.03', 'map'),
     ('sagstype', N'PPR-sag',  N'1',        'map'),
+    /* Sagsskabelonen er blokerende: uden den afvises hver eneste sag med
+       manglende_mapping, foer noget andet bliver afproevet. Id'et er
+       opdigtet — attrappen validerer det ikke. Mod et rigtigt SBSYS skal
+       det vaere et id fra `konv opslag skabeloner`. */
+    ('sagsskabelon', N'PPR-sag', N'332',   'map'),
     ('afdeling', N'PPR Nord', N'4711',     'map'),
     ('bruger',   N'ab1234',   N'9000',     'map'),
     /* Bevidst uden sbsys_vaerdi: skal udløse en afvisning */

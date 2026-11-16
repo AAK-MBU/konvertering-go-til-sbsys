@@ -32,6 +32,10 @@ from urllib.parse import parse_qs
 _taeller = {"id": 1000}
 _fejlprocent = 0
 
+# Det fiktive CPR fra sql/999_testdata.sql ($(cpr2|0202022345)), som
+# loaderen sender med bindestreg. Attrappen "kender" ikke denne borger.
+UKENDT_CPR = "020202-2345"
+
 
 class Attrap(BaseHTTPRequestHandler):
     def _svar(self, kode: int, krop: object = None) -> None:
@@ -68,6 +72,13 @@ class Attrap(BaseHTTPRequestHandler):
                 print("       (password grant uden username — SBSYS ville svare 400)")
             return self._svar(200, {"access_token": "attrap-token", "expires_in": 3600})
 
+        # Soegninger er POST i SBSYS og skal svare 200 med et resultat — ikke
+        # 201 som en oprettelse. Svarede attrappen 201, afviste klienten svaret
+        # (soegningerne forventer 200/204/404), og sagsindlaesningen stoppede
+        # ved foerste sag, fordi partopslaget er foerste kald.
+        if self.path.rstrip("/").endswith("/search"):
+            return self._soegning(krop_raa)
+
         if _fejlprocent and random.randint(1, 100) <= _fejlprocent:
             print(f"  500  {self.path}  (fremprovokeret)")
             return self._svar(500)
@@ -79,6 +90,33 @@ class Attrap(BaseHTTPRequestHandler):
         self._svar(201, {"Id": nyt_id, "Nummer": f"ATTRAP-{nyt_id}"})
 
     do_PATCH = do_POST
+
+    def _soegning(self, krop_raa: bytes) -> None:
+        """Personsoegning finder parten; alle andre soegninger finder intet.
+
+        Personen findes altid — undtagen CPR'et UKENDT_CPR, der er det
+        fiktive nummer TEST-PART-002 faar i sql/999_testdata.sql. Saa viser
+        samme koersel baade en sag der oprettes, og en der afvises med
+        'part_ikke_i_sbsys'.
+
+        Sags-, kladde- og indsatssoegninger svarer tomt, saa loaderen tror
+        objektet ikke findes i forvejen og opretter det.
+        """
+        try:
+            kriterier = json.loads(krop_raa or b"{}")
+        except ValueError:
+            kriterier = {}
+        if "/person/" in self.path or "/firma/" in self.path:
+            nummer = str(kriterier.get("CprNummer") or kriterier.get("CvrNummer") or "")
+            if nummer == UKENDT_CPR:
+                print(f"  200  {self.path}  (ingen part fundet — som et ukendt CPR i SBSYS)")
+                return self._svar(200, {"Results": []})
+            # Stabilt PartId pr. nummer, saa samme borger faar samme id hver gang
+            part_id = 7000 + sum(map(ord, nummer)) % 1000
+            print(f"  200  {self.path}  PartId={part_id}")
+            return self._svar(200, {"Results": [{"Id": part_id}]})
+        print(f"  200  {self.path}  (intet fundet)")
+        return self._svar(200, {"Results": []})
 
     def log_message(self, *_: object) -> None:
         """Stilhed — vi printer selv det vi vil se."""
