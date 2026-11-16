@@ -2,3 +2,5 @@ liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af
 sagsstatus;Active;Aktiv;1;Aktiv;map;;;
 sagsstatus;Closed;Afsluttet;3;Afsluttet;map;;;
 sagsstatus;Draft;Kladde;;;ignorer;Kladder konverteres ikke;;
+sagsstatus;Åben;Åben;;Åben;map;Vaerdi i testdumpet. Konvertering GO-SBSYS – Til NC.xlsx, ark Konvertering af sager: lukkede sager -> Passiv, aabne -> Åben (noteret for PPR). SagsStatusId hentes fra SBSYS.;;
+sagsstatus;Lukket;Lukket;;Passiv;map;Vaerdi i testdumpet. Konvertering GO-SBSYS – Til NC.xlsx, ark Konvertering af sager: lukkede sager -> Passiv, aabne -> Åben (noteret for PPR). SagsStatusId hentes fra SBSYS.;;
