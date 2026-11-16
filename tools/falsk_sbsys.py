@@ -76,7 +76,9 @@ class Attrap(BaseHTTPRequestHandler):
         # 201 som en oprettelse. Svarede attrappen 201, afviste klienten svaret
         # (soegningerne forventer 200/204/404), og sagsindlaesningen stoppede
         # ved foerste sag, fordi partopslaget er foerste kald.
-        if self.path.rstrip("/").endswith("/search"):
+        # Uden query-strengen: sagssoegningen sender ?InkluderParterIResultat=true,
+        # og saa ender stien ikke laengere paa /search.
+        if self.path.split("?", 1)[0].rstrip("/").endswith("/search"):
             return self._soegning(krop_raa)
 
         if _fejlprocent and random.randint(1, 100) <= _fejlprocent:
@@ -90,6 +92,17 @@ class Attrap(BaseHTTPRequestHandler):
         self._svar(201, {"Id": nyt_id, "Nummer": f"ATTRAP-{nyt_id}"})
 
     do_PATCH = do_POST
+
+    def do_PUT(self) -> None:  # noqa: N802
+        """Opdateringer, fx status efter oprettelsen: PUT /api/sag/{id}/status.
+
+        Uden denne svarede attrappen 501, og hver sag fik en advarsel om at
+        statussen ikke blev sat. Svarer 200 og viser hvad der blev sendt.
+        """
+        laengde = int(self.headers.get("Content-Length", 0))
+        krop = self.rfile.read(laengde).decode("utf-8", "replace")
+        print(f"  200  PUT {self.path}  {krop[:120]}")
+        self._svar(200, {})
 
     def _soegning(self, krop_raa: bytes) -> None:
         """Personsoegning finder parten; alle andre soegninger finder intet.

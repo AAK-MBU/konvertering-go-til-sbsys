@@ -6,8 +6,15 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
+from ..hashing import maskér
 from ..models import Objekttype, Sag
-from ..sbsys.errors import PermanentFejl, ValideringsFejl
+from ..sbsys.errors import (
+    CertifikatFejl,
+    ForbigaaendeFejl,
+    PermanentFejl,
+    VaertsnavnFejl,
+    ValideringsFejl,
+)
 from .base import Loader, boelge_filter
 
 log = logging.getLogger(__name__)
@@ -20,6 +27,8 @@ class SagLoader(Loader[Sag]):
     def __init__(self, k) -> None:  # noqa: ANN001
         super().__init__(k)
         self._part_cache: dict[str, int] = {}
+        # kilde_noegle -> (CPR/CVR formateret til SBSYS, er_firma). Til genfindingen.
+        self._part_nummer: dict[str, tuple[str, bool]] = {}
 
     def hent_arbejde(self, graense: int | None = None) -> Iterable[dict[str, Any]]:
         # Sideopdelt efter nøgle, ikke streamet: loaderen skriver til
@@ -60,20 +69,30 @@ class SagLoader(Loader[Sag]):
         )
 
     def payload(self, objekt: Sag) -> dict[str, Any]:
-        krop = self.k.endpoints.byg_payload(
+        """Kroppen til POST /api/sag/template — plus det der saettes bagefter.
+
+        Kun felter CreateSagFromSkabelonDto kender, sendes med. Fire ting fra
+        GO kan IKKE gaa med i oprettelsen:
+
+        * **status** saettes i et selvstaendigt kald efter oprettelsen. Den
+          ligger under ``_efter_oprettelse`` i payloaden, saa den ses i
+          ``--vis-payload`` og indgaar i hashen, men den sendes ikke med i
+          oprettelsen. ``send()`` tager den ud.
+        * **sagstypen** kommer fra skabelonen.
+        * **oprettelses- og afslutningsdato** findes ikke paa modellen —
+          spoergsmaal A2. De ligger stadig i stg.sag.
+        * **beskrivelsen** findes heller ikke paa modellen.
+        """
+        e = self.k.endpoints
+        krop = e.byg_payload(
             "sag",
             {
                 "titel": objekt.titel,
-                "beskrivelse": objekt.beskrivelse,
                 "kle": objekt.kle,
                 "facet": objekt.facet,
-                "sagstype": objekt.sagstype,
                 "skabelon": objekt.skabelon,
-                "status": objekt.status,
                 "ansvarlig": objekt.ansvarlig,
                 "afdeling": objekt.afdeling,
-                "oprettet_dato": objekt.oprettet_dato.isoformat() if objekt.oprettet_dato else None,
-                "afsluttet_dato": objekt.afsluttet_dato.isoformat() if objekt.afsluttet_dato else None,
                 # Ingen ekstern_noegle: besluttet 11-11-2026 at GO-nøglen IKKE
                 # skrives ind i SBSYS. Koblingen lever kun i konv.id_map.
                 # Se ADR-0001 og _find_identisk nedenfor for følgen.
@@ -84,33 +103,89 @@ class SagLoader(Loader[Sag]):
         # sendes, og så er gennemsynet før første rigtige kald værdiløst.
         # Opslaget er read-only.
         part = self._part_reference(objekt)
-        krop[self.k.endpoints.felt("sag", "primaer_part")] = part
-        krop[self.k.endpoints.felt("sag", "parter")] = [part]
+        krop[e.felt("sag", "primaer_part")] = part
+        krop[e.felt("sag", "parter")] = [part]
+
+        if objekt.status:
+            # Kommentaren sendes altid: en status kan have RequireComments
+            # (SagsStatusDto), og saa afviser SBSYS skiftet uden. Passiv er
+            # en oplagt kandidat. Teksten er ikke en GO-noegle — den siger
+            # kun hvorfor statussen blev sat, i sagens statushistorik.
+            krop[EFTER_OPRETTELSE] = {
+                "status": e.byg_payload("sagsstatus", {
+                    "status": objekt.status,
+                    "kommentar": STATUSKOMMENTAR,
+                }),
+            }
         return krop
 
     def send(self, objekt: Sag, payload: dict[str, Any]) -> tuple[str, str | None]:
+        efter = payload.get(EFTER_OPRETTELSE) or {}
+        oprettelse = {k: v for k, v in payload.items() if k != EFTER_OPRETTELSE}
+
         # Før oprettelse: findes sagen allerede? Fanger det tilfælde hvor et
         # tidligere kald nåede frem, men svaret gik tabt.
-        eksisterende = self._find_identisk(objekt, payload)
-        if eksisterende:
+        sbsys_id: str | None = self._find_identisk(objekt, oprettelse)
+        sbsys_nummer: str | None = None
+        if sbsys_id:
             log.warning("Sag %s fandtes allerede i SBSYS (id=%s) — genbruger",
-                        objekt.kilde_noegle[:12], eksisterende)
-            return eksisterende, None
-
-        op = self.k.endpoints.operation("opret_sag")
-        svar = self.k.klient.kald(
-            op.metode, op.sti, operation="opret_sag", json=payload,
-            forventede_status=op.forventede_status,
-            kontekst={"objekt_type": "sag", "kilde_noegle": objekt.kilde_noegle},
-        )
-        krop = svar.krop or {}
-        sbsys_id = _foerste(krop, "Id", "id", "SagId", "sagId")
-        if not sbsys_id:
-            raise PermanentFejl(
-                "SBSYS returnerede intet id ved oprettelse af sag",
-                korrelations_id=svar.korrelations_id,
+                        objekt.kilde_noegle[:12], sbsys_id)
+        else:
+            op = self.k.endpoints.operation("opret_sag")
+            svar = self.k.klient.kald(
+                op.metode, op.sti, operation="opret_sag", json=oprettelse,
+                forventede_status=op.forventede_status,
+                kontekst={"objekt_type": "sag", "kilde_noegle": objekt.kilde_noegle},
             )
-        return str(sbsys_id), _foerste(krop, "Nummer", "SagsNummer", "sagsnummer")
+            krop = svar.krop or {}
+            fundet_id = _foerste(krop, "Id", "id", "SagId", "sagId")
+            if not fundet_id:
+                raise PermanentFejl(
+                    "SBSYS returnerede intet id ved oprettelse af sag",
+                    korrelations_id=svar.korrelations_id,
+                )
+            sbsys_id = str(fundet_id)
+            # SagDtoV10: Nummer er sagsnummeret som tekst. SagsNummer er et
+            # OBJEKT (SagNummerDto) og maa ikke ende i konv.id_map som tekst.
+            nummer = krop.get("Nummer") if isinstance(krop, dict) else None
+            sbsys_nummer = nummer if isinstance(nummer, str) else None
+
+        # Status saettes OGSAA paa en genfundet sag: var den oprettet, men
+        # svaret tabt, naaede statussen aldrig at blive sat.
+        if efter.get("status"):
+            self._saet_status(objekt, sbsys_id, efter["status"])
+        return sbsys_id, sbsys_nummer
+
+    def _saet_status(self, objekt: Sag, sbsys_id: str, krop: dict[str, Any]) -> None:
+        """PUT /api/sag/{id}/status. Fejler den, afvises sagen IKKE.
+
+        Sagen findes paa dette tidspunkt i SBSYS. Rejste vi fejlen videre,
+        ville sagen staa som 'failed' i konv.id_map uden sit SBSYS-id —
+        og naeste koersel ville oprette den IGEN, medmindre genfindingen
+        rammer. En forkert status kan rettes; en dublet af en boernesag er
+        langt vaerre. Fejlen skrives derfor som en advarsel i konv.afvist
+        (regel 'status_ikke_sat'), og sagen markeres som indlaest.
+
+        Konfigurationsfejl (DNS, certifikat, 401) stopper stadig kørslen.
+        """
+        op = self.k.endpoints.operation("opdater_sagsstatus", sag_id=sbsys_id)
+        try:
+            self.k.klient.kald(
+                op.metode, op.sti, operation="opdater_sagsstatus", json=krop,
+                forventede_status=op.forventede_status,
+                kontekst={"objekt_type": "sag", "kilde_noegle": objekt.kilde_noegle},
+            )
+        except (VaertsnavnFejl, CertifikatFejl):
+            raise
+        except (PermanentFejl, ForbigaaendeFejl) as e:
+            log.warning("Sag %s oprettet (id=%s), men status kunne ikke saettes: %s",
+                        objekt.kilde_noegle[:12], sbsys_id, maskér(str(e)))
+            self._afvis(
+                objekt.kilde_noegle, "status_ikke_sat", "advarsel",
+                f"Sagen er oprettet i SBSYS (id={sbsys_id}), men status blev ikke "
+                f"sat: {maskér(str(e))}",
+                felt="status", vaerdi=str(objekt.status),
+            )
 
     def _part_reference(self, objekt: Sag) -> dict[str, Any]:
         """Slå sagens primære part op i SBSYS og byg referencen.
@@ -148,6 +223,9 @@ class SagLoader(Loader[Sag]):
             )
 
         part_id = self._slaa_part_op(nummer, er_firma)
+        # Huskes til genfindingen: soegningen angiver parten med CPR/CVR,
+        # ikke med PartId.
+        self._part_nummer[objekt.kilde_noegle] = (_formatér_nummer(nummer, er_firma), er_firma)
         return {
             self.k.endpoints.felt("part", "part_id"): part_id,
             self.k.endpoints.felt("part", "part_type"): "Firma" if er_firma else "Person",
@@ -164,11 +242,9 @@ class SagLoader(Loader[Sag]):
 
         op = self.k.endpoints.operation("soeg_firma" if er_firma else "soeg_person")
         felt = self.k.endpoints.felt("part", "cvr" if er_firma else "cpr")
-        # SBSYS vil have CPR med bindestreg: DDMMYY-NNNN.
-        vaerdi = nummer if er_firma or "-" in nummer else f"{nummer[:6]}-{nummer[6:]}"
         svar = self.k.klient.kald(
             op.metode, op.sti, operation=op.sti.strip("/").replace("/", "_"),
-            json={felt: vaerdi}, forventede_status=(200, 204, 404),
+            json={felt: _formatér_nummer(nummer, er_firma)}, forventede_status=(200, 204, 404),
         )
         traef = self.k.endpoints.soegningstraef(svar.krop)
         if not traef:
@@ -194,42 +270,86 @@ class SagLoader(Loader[Sag]):
         "ved ikke", og sagen fejler hellere end at hægte dokumenter og
         indsatser på den forkerte.
 
+        Kriterierne følger SagSearchQueryV29: ``Titel`` og ``PrimaerPerson``
+        (eller ``PrimaertFirma``) med CPR/CVR. Den første udgave sendte
+        ``SagsTitel`` og et ``PrimaryPart``-objekt, som søgningen ikke kender.
+
+        Hvert træf kontrolleres desuden HER: titlen skal være identisk, og
+        sagens primære part skal være præcis samme PartId. Ignorerer SBSYS
+        et kriterium, svarer den med vilkårlige sager — og uden kontrollen
+        kunne en sag på et andet barn med samme titel blive genbrugt.
+
         Det er svagere end et nøglefelt. Konsekvensen står i ADR-0001:
         et tabt svar på en sag med en tvetydig titel skal ryddes op i
         hånden med ``konv genskab``.
         """
+        e = self.k.endpoints
         try:
-            op = self.k.endpoints.operation("soeg_sag")
+            op = e.operation("soeg_sag")
         except Exception:
             return None
 
-        part = payload.get(self.k.endpoints.felt("sag", "primaer_part"))
-        if not part or not objekt.titel:
+        part = payload.get(e.felt("sag", "primaer_part"))
+        nummer = self._part_nummer.get(objekt.kilde_noegle)
+        if not part or not objekt.titel or not nummer:
             # Uden en part at afgrænse på ville søgningen ramme hele SBSYS.
             # Så hellere ingen kontrol end en der tilfældigvis rammer.
             return None
+        vaerdi, er_firma = nummer
+        part_id = part.get(e.felt("part", "part_id"))
 
-        kriterier: dict[str, Any] = {
-            self.k.endpoints.felt("sag", "titel"): objekt.titel,
-            self.k.endpoints.felt("sag", "primaer_part"): part,
-        }
+        kriterier = e.byg_payload("sagssoegning", {
+            "titel": objekt.titel,
+            ("primaert_firma" if er_firma else "primaer_person"): vaerdi,
+        })
         # SBSYS' søgning er en POST med kriterierne i kroppen, ikke en GET
         # med query-parametre (en GET giver 405), og paging-felterne SKAL
-        # med. Formen er den som kommunens egen SBSYS-klient bruger og har
-        # verificeret mod testmiljøet.
+        # med. Parterne kommer kun med i resultatet, når der bedes om dem.
         som_krop = op.metode.upper() in ("POST", "PUT", "PATCH")
         svar = self.k.klient.kald(
             op.metode, op.sti, operation="soeg_sag",
-            json=self.k.endpoints.soegningskrop(kriterier) if som_krop else None,
-            params=None if som_krop else kriterier,
+            json=e.soegningskrop(kriterier) if som_krop else None,
+            params={"InkluderParterIResultat": "true"} if som_krop else kriterier,
             forventede_status=(200, 204, 404),
         )
         if svar.status != 200 or not svar.krop:
             return None
-        traef = self.k.endpoints.soegningstraef(svar.krop)
+        traef = [
+            r for r in e.soegningstraef(svar.krop)
+            if _samme_sag(r, objekt.titel, part_id, e.felt("part", "part_id"))
+        ]
         if len(traef) == 1:
             return str(_foerste(traef[0], "Id", "id", "SagId") or "") or None
         return None
+
+
+# Noeglen i payloaden for det der saettes EFTER oprettelsen. Underscoren er
+# med vilje: SBSYS har ingen felter der starter med en, saa den kan aldrig
+# kollidere med et rigtigt felt — og send() fjerner den foer kaldet.
+EFTER_OPRETTELSE = "_efter_oprettelse"
+
+# Kommentaren paa statusskiftet efter oprettelsen. Ses i sagens statushistorik.
+STATUSKOMMENTAR = "Status overført ved konvertering fra GetOrganized"
+
+
+def _formatér_nummer(nummer: str, er_firma: bool) -> str:
+    """SBSYS vil have CPR med bindestreg (DDMMYY-NNNN); CVR som det er."""
+    if er_firma or "-" in nummer:
+        return nummer
+    return f"{nummer[:6]}-{nummer[6:]}"
+
+
+def _samme_sag(raekke: Any, titel: str, part_id: Any, part_felt: str) -> bool:
+    """Er søgeresultatet præcis denne sag: samme titel og samme primære part?"""
+    if not isinstance(raekke, dict) or part_id is None:
+        return False
+    raekkens_titel = raekke.get("SagsTitel") or raekke.get("Titel") or ""
+    primaer = raekke.get("PrimaryPart") or {}
+    return (
+        str(raekkens_titel).strip() == titel.strip()
+        and isinstance(primaer, dict)
+        and str(primaer.get(part_felt)) == str(part_id)
+    )
 
 
 def _foerste(krop: Any, *navne: str) -> Any:

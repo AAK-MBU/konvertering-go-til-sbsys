@@ -399,7 +399,8 @@ def _parser() -> argparse.ArgumentParser:
         "opslag", help="Hent SBSYS' egne lister (afdelinger, skabeloner) som CSV")
     opslag.add_argument(
         "hvad",
-        choices=["afdelinger", "skabeloner", "brugere", "mig", "katalog", "tilbud"])
+        choices=["afdelinger", "skabeloner", "statusser", "dokumentarter", "brugere", "mig",
+                 "katalog", "tilbud"])
     opslag.add_argument("--ud", type=Path, default=None,
                         help="Standard: rapporter/<hvad>-fra-sbsys.csv")
 
@@ -929,6 +930,11 @@ _OPSLAG = {
     "katalog": ("hent_katalog", ("paragrafId", "paragraf", "foranstaltningId",
                                  "foranstaltning", "tilbudId", "tilbud")),
     "tilbud": ("hent_tilbud", ("id", "navn", "tilbudType", "inaktiv", "inaktivDato")),
+    # SagsStatusDto. RequireComments viser hvilke statusser der kræver en
+    # kommentar ved skift — loaderen sender derfor altid en.
+    "statusser": ("hent_statusser", ("Id", "Navn", "SagsTilstand", "RequireComments", "Orden")),
+    # DokumentArtDto — kilden til mapping/dokumentkategori.csv.
+    "dokumentarter": ("hent_dokumentarter", ("Id", "Navn", "Uuid")),
 }
 
 # Lister der ligger i Børn og Unge-API'et og ikke i SBSYS selv.

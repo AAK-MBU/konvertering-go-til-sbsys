@@ -86,7 +86,8 @@ class DokumentLoader(Loader[Dokument]):
                 "titel": objekt.titel,
                 "kategori": objekt.kategori,
                 "dokument_dato": objekt.dokument_dato.isoformat() if objekt.dokument_dato else None,
-                "retning": str(objekt.retning),
+                # Ingen retning: JournaliserDokumentInputDtoV10 har intet felt
+                # til den, og GO har heller ikke et ind-/udgaaende-begreb (A21).
                 "forfatter": objekt.forfatter,
                 # Ingen ekstern_noegle: besluttet 11-11-2026 at GO-nøglen IKKE
                 # skrives ind i SBSYS, heller ikke hvor feltet findes.

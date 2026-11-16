@@ -187,7 +187,8 @@ def test_id_sendes_som_tal_ikke_streng():
     """Kodelisterne er CSV, saa alt derfra er tekst — men SBSYS' id-felter
     er heltal, og "4711" afvises hvor 4711 accepteres."""
     payload = Endpoints().byg_payload("sag", {"afdeling": "4711"})
-    assert payload["Ansaettelsessted"] == {"AnsaettelsesstedId": 4711}
+    # Ansaettelsessted er en BaseUuidDto {Id, Uuid, Navn} paa CreateSagFromSkabelonDto
+    assert payload["Ansaettelsessted"] == {"Id": 4711}
 
 
 def test_kun_rene_cifre_i_id_felter_omsaettes():
