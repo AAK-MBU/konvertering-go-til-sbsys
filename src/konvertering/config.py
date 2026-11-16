@@ -217,9 +217,6 @@ class FilIndstillinger:
     rod: Path
     maks_stoerrelse_mb: int = 250
     tillad_tomme_filer: bool = False
-    # Filnavne fra SharePoint/GO kan indeholde tegn Windows-share'et ikke kan
-    # repræsentere direkte; fallback-opslag på normaliseret navn.
-    normaliser_navne: bool = True
 
 
 @dataclass(frozen=True)

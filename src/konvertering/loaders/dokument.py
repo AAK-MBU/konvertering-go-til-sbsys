@@ -106,7 +106,7 @@ class DokumentLoader(Loader[Dokument]):
 
         # Filen findes og verificeres FØR metadata oprettes, så vi ikke
         # efterlader tomme dokumentskaller i SBSYS.
-        resultat = self.k.filer.undersoeg(objekt.fil_sti, objekt.fil_navn, beregn_checksum=False)
+        resultat = self.k.filer.undersoeg(objekt.fil_sti, beregn_checksum=False)
         if resultat.status != FILSTATUS_OK or resultat.sti is None:
             raise FilFejl(resultat.besked or "Filen kunne ikke bruges",
                           regel=f"fil_{resultat.status}", sti=objekt.fil_sti)

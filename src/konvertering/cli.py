@@ -792,7 +792,7 @@ def _scan_filer(settings: Settings, args) -> int:
     opslag = FilOpslag(settings.filer)
     filter_sql, params = boelge_filter(valgt)
     opdateringer: list[tuple] = []
-    talt = {"ok": 0, "mangler": 0, "tom": 0, "for_stor": 0}
+    talt = {"ok": 0, "mangler": 0, "tvetydig": 0, "tom": 0, "for_stor": 0}
 
     # Sideopdelt, ikke streamet: vi skriver fil_status undervejs.
     for raekke in db.hent_i_sider(
@@ -803,7 +803,7 @@ def _scan_filer(settings: Settings, args) -> int:
         graense=args.graense,
     ):
         r = opslag.undersoeg(
-            raekke["fil_relativ_sti"], raekke["fil_navn"],
+            raekke["fil_relativ_sti"],
             beregn_checksum=not args.uden_checksum,
         )
         talt[r.status] = talt.get(r.status, 0) + 1
@@ -814,14 +814,18 @@ def _scan_filer(settings: Settings, args) -> int:
 
     _gem_filstatus(db, opdateringer)
     log.info("Filscan færdig: %s", talt)
-    return 0 if talt.get("mangler", 0) == 0 else 1
+    return 0 if talt.get("mangler", 0) == 0 and talt.get("tvetydig", 0) == 0 else 1
 
 
 def _gem_filstatus(db: Database, raekker: list[tuple]) -> None:
+    # COALESCE på checksummen: extract har allerede lagt KILDENS checksum
+    # (Documents.SHACheckSum / DocumentSHA) i fil_sha256. Uden den blev den
+    # overskrevet af vores egen — og med --uden-checksum af NULL, så sporet
+    # tilbage til GO forsvandt ved første hurtige scan. Se B13.
     if raekker:
         db.udfoer_mange(
             "UPDATE stg.dokument SET fil_status = ?, fil_stoerrelse = ?, "
-            "fil_sha256 = ?, mime = ? WHERE kilde_noegle = ?",
+            "fil_sha256 = COALESCE(fil_sha256, ?), mime = ? WHERE kilde_noegle = ?",
             raekker,
         )
 

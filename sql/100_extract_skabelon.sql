@@ -21,8 +21,11 @@
   stagingdatabasens egne loebenumre. De aendrer sig ved naeste indlaesning
   og maa ALDRIG bruges som kilde_noegle.
 
-    stg.sag       Cases.GOSagsID            nvarchar(36), en GUID. Stabil
-                                            (bekraeftet af NC 11-11-2026)
+    stg.sag       Cases.GOSagsID            nvarchar(36), GO's sagsnummer
+                                            (fx PPR-2015-123456-001). Stabil
+                                            (bekraeftet af NC 11-11-2026), og
+                                            OGSAA mappenavnet paa fileshare'et
+                                            (bekraeftet 16-11-2026)
     stg.dokument  Documents.DokumentID      GO's eget dokument-id
     stg.notat     JournalNotes.DokumentID   GO's eget id
     stg.part      CPR eller CVR             Contacts har INGEN stabil egen
@@ -67,7 +70,7 @@ INSERT INTO stg.sag (
     primaer_part_noegle, raa_json
 )
 SELECT
-    c.[GOSagsID],                     -- GUID, stabil. IKKE c.ID
+    c.[GOSagsID],                     -- sagsnummeret, stabilt. IKKE c.ID
     c.[GOSagsID],                     -- GO har intet separat sagsnummer
     LEFT(NULLIF(LTRIM(RTRIM(c.[Sagsnavn])), N''), 500),
     c.[KLE],
@@ -259,14 +262,24 @@ SELECT
        Et dokument der er kladde i GO, skal vaere kladde i SBSYS — ikke
        journaliseret, og ikke udeladt. */
     CASE WHEN d.[Journaliseret] = 1 THEN 0 ELSE 1 END,
-    /* Komplet relativ sti. FilOpslag.find() laegger roden foran og
-       forventer en sti TIL FILEN — ikke til mappen. Er mappen tom,
-       staar filnavnet alene, og indeksopslaget er sidste udvej. */
-    CASE
-        WHEN NULLIF(LTRIM(RTRIM(d.[Mappestruktur])), N'') IS NULL THEN d.[Filnavn]
-        WHEN d.[Filnavn] IS NULL THEN d.[Mappestruktur]
-        ELSE LTRIM(RTRIM(d.[Mappestruktur])) + N'\' + d.[Filnavn]
-    END,
+    /* Sti paa fileshare'et, relativ til KONV_FIL_ROD (\\<server>\GO_Files):
+           <SagsId>/<DokumentID>.<endelse>
+       Bekraeftet 16-11-2026 mod testdumpet: mappen hedder sagens GOSagsID
+       (fx PPR-2015-123456-001), og filen hedder dokument-id'et med
+       endelsen fra GO's oprindelige filnavn. Mappestruktur er tom for alle
+       dokumenter og bruges ikke.
+
+       Overloebsmapper (<SagsId>_1, _2 ved over 1000 filer) og endelsens
+       store/smaa bogstaver haandteres af FilOpslag, ikke her: hvilken
+       mappe filen ligger i, kan kun filsystemet svare paa. Har Filnavn
+       ingen endelse, staar dokument-id'et alene, og FilOpslag leder efter
+       <DokumentID>.* i stedet. */
+    d.[SagsId] + N'/' + CONVERT(NVARCHAR(20), d.[DokumentID])
+        + CASE WHEN CHARINDEX(N'.', REVERSE(d.[Filnavn])) > 1
+               THEN RIGHT(d.[Filnavn], CHARINDEX(N'.', REVERSE(d.[Filnavn])))
+               ELSE N'' END,
+    /* GO's oprindelige filnavn — det sagsbehandleren ser i SBSYS. Det er
+       IKKE navnet paa disken. */
     d.[Filnavn],
     d.[Filstoerrelse],
     /* Checksum FRA KILDEN. `konv filer scan` skal ikke beregne den igen;
@@ -332,11 +345,12 @@ SELECT
     1,
     1,
     0,
-    /* ScpFolder + DokumentID. Filnavnet staar i id-kolonnen. */
-    CASE
-        WHEN NULLIF(LTRIM(RTRIM(n.[ScpFolder])), N'') IS NULL THEN n.[DokumentID]
-        ELSE LTRIM(RTRIM(n.[ScpFolder])) + N'\' + n.[DokumentID]
-    END,
+    /* <SagsId>/<DokumentID>, som for de oevrige dokumenter. Filnavnet staar
+       i id-kolonnen. ScpFolder er '/GO_Files/<SagsId>' (bekraeftet 16/16
+       mod testdumpet 16-11-2026) — men med '/GO_Files/' foran ville stien
+       blive ...\GO_Files\GO_Files\..., fordi KONV_FIL_ROD allerede er
+       GO_Files. Derfor bygges stien af SagsId og ikke af ScpFolder. */
+    n.[SagsId] + N'/' + n.[DokumentID],
     n.[DokumentID],
     NULLIF(LTRIM(RTRIM(n.[SHACheckSum])), N''),
     (SELECT n.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
@@ -370,10 +384,8 @@ SELECT
     1,
     1,
     0,
-    CASE
-        WHEN NULLIF(LTRIM(RTRIM(w.[ScpFolder])), N'') IS NULL THEN w.[DokumentID]
-        ELSE LTRIM(RTRIM(w.[ScpFolder])) + N'\' + w.[DokumentID]
-    END,
+    /* Samme form som journalnotaterne — se dem for hvorfor ikke ScpFolder */
+    w.[SagsId] + N'/' + w.[DokumentID],
     w.[DokumentID],
     NULLIF(LTRIM(RTRIM(w.[SHACheckSum])), N''),
     (SELECT w.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
@@ -393,9 +405,16 @@ WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId]);
   ene indsats forsvinder lydloest. Derfor taelles dubletter FOER
   indlaesningen, og kørslen stopper hvis der er nogen. Se B14.
 
-  Datoerne Fra og Til er nvarchar(256), ikke datoer. TRY_CONVERT giver
-  NULL paa det der ikke kan tolkes, og de raekker fanges af
-  ValideringsFejl 'mangler_periode' i loaderen frem for at blive gaettet.
+  Datoerne Fra og Til er nvarchar(256), ikke datoer, og de staar som
+  dd-mm-aaaa (bekraeftet 16-11-2026: 437 af 1777 Fra-vaerdier havde en dag
+  over 12 i foerste felt). Formatet SKAL angives (stil 105): uden det
+  laeser SQL Server efter serverens sprog, og med us_english/mdy bliver
+  05-03-2021 lydloest til 3. maj. Det er en forkert dato, ikke en fejl —
+  den ville ende i SBSYS som en indsats med forkert periode.
+
+  TRY_CONVERT giver NULL paa det der stadig ikke kan tolkes, og de raekker
+  fanges af ValideringsFejl 'mangler_periode' i loaderen frem for at blive
+  gaettet.
 */
 DELETE FROM stg.indsats;
 
@@ -405,7 +424,7 @@ DELETE FROM stg.indsats;
                      f.[SagsId] + '|' + COALESCE(f.[Indholdstype], N'')
                                + '|' + COALESCE(f.[Ydelse], N'')
                                + '|' + COALESCE(CONVERT(VARCHAR(10),
-                                          TRY_CONVERT(DATE, f.[Fra]), 23), N'')),
+                                          TRY_CONVERT(DATE, f.[Fra], 105), 23), N'')),
         f.*
     FROM GOStaging.dbo.[Foranstaltningsdata] AS f
 )
@@ -418,8 +437,8 @@ SELECT
     k.[SagsId],
     k.[Ydelse],
     k.[Bevillingstype],
-    TRY_CONVERT(DATETIME2(3), k.[Fra]),
-    TRY_CONVERT(DATETIME2(3), k.[Til]),
+    TRY_CONVERT(DATETIME2(3), k.[Fra], 105),
+    TRY_CONVERT(DATETIME2(3), k.[Til], 105),
     /* Timer er fritekst ("4 timer ugentligt"). Antal og enhed kan ikke
        udledes forsvarligt, og et gaet her bliver til en bevilling.
        Lades tom indtil E2b er afklaret; vaerdien er bevaret i raa_json. */
@@ -437,21 +456,24 @@ WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = k.[SagsId])
    skal ses af et menneske. */
 IF EXISTS (
     SELECT 1 FROM GOStaging.dbo.[Foranstaltningsdata] f
-    GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra])
+    GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra], 105)
     HAVING COUNT(*) > 1
 )
 BEGIN
     DECLARE @dubletter INT = (
         SELECT COUNT(*) FROM (
             SELECT 1 AS x FROM GOStaging.dbo.[Foranstaltningsdata] f
-            GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra])
+            GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra], 105)
             HAVING COUNT(*) > 1
         ) AS d);
-    RAISERROR(
-        'Foranstaltningsdata: %d noeglekollisioner. Den sammensatte noegle '
-        '(sag+indholdstype+ydelse+fra) er ikke unik. Indsatserne er IKKE '
-        'indlaest. Se B14 i docs/04-aabne-spoergsmaal.md.',
-        16, 1, @dubletter);
+    /* Beskeden bygges i en variabel. T-SQL saetter ikke to strenge sammen
+       fordi de staar ved siden af hinanden (det gav Msg 102), og RAISERROR
+       tager kun en literal eller en variabel — ikke et udtryk med +. */
+    DECLARE @kollisionsbesked NVARCHAR(400) =
+        N'Foranstaltningsdata: %d noeglekollisioner. Den sammensatte noegle '
+        + N'(sag+indholdstype+ydelse+fra) er ikke unik. De kolliderende '
+        + N'raekker er IKKE lagt i stg.indsats. Se B14 i docs/04-aabne-spoergsmaal.md.';
+    RAISERROR(@kollisionsbesked, 16, 1, @dubletter);
 END
 
 /* ================================================================== */

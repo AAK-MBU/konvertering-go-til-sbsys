@@ -51,9 +51,10 @@ IF COL_LENGTH('stg.sag', 'organisering_go') IS NULL
     ALTER TABLE stg.sag ADD organisering_go NVARCHAR(50) NULL;
 GO
 
-IF COL_LENGTH('stg.dokument', 'er_kladde') IS NULL
-    ALTER TABLE stg.dokument ADD er_kladde BIT NOT NULL DEFAULT 0;
-GO
+/* stg.dokument.er_kladde tilfoejes EFTER CREATE TABLE stg.dokument laengere
+   nede. Stod den her, fejlede `konv db init` paa en tom database: COL_LENGTH
+   er NULL naar tabellen ikke findes, og saa forsoegte den at aendre en
+   tabel der endnu ikke var oprettet. */
 
 
 IF OBJECT_ID('stg.part') IS NULL
@@ -104,11 +105,17 @@ CREATE TABLE stg.dokument (
     fil_navn        NVARCHAR(400) NULL,
     fil_stoerrelse  BIGINT        NULL,
     fil_sha256      CHAR(64)      NULL,       -- udfyldes af `konv filer scan`
-    fil_status      VARCHAR(20)   NULL,       -- ok | mangler | tom | laast
+    fil_status      VARCHAR(20)   NULL,       -- ok | mangler | tvetydig | tom | for_stor
     mime            NVARCHAR(150) NULL,
     raa_json        NVARCHAR(MAX) NULL,
     indlaest        DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
 );
+GO
+
+/* Til databaser hvor stg.dokument blev oprettet foer er_kladde fandtes.
+   Staar EFTER CREATE TABLE, saa den aldrig rammer en tabel der ikke findes. */
+IF COL_LENGTH('stg.dokument', 'er_kladde') IS NULL
+    ALTER TABLE stg.dokument ADD er_kladde BIT NOT NULL DEFAULT 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
