@@ -77,7 +77,10 @@ def test_endelsens_store_bogstaver_er_ligegyldige(tmp_path: Path):
     r = _opslag(tmp_path).undersoeg(f"{SAG}/5099.tif")
 
     assert r.status == FILSTATUS_OK
-    assert r.sti.name == "5099.TIF", "den rigtige fil på disken, ikke stien fra databasen"
+    # Den rigtige fil — uanset hvilken stavemåde stien kommer tilbage med.
+    # På Linux findes den ved at liste mappen og hedder 5099.TIF; på
+    # Windows, der ikke skelner, rammer det direkte opslag med 5099.tif.
+    assert r.sti.samefile(tmp_path / SAG / "5099.TIF")
 
 
 def test_uden_endelse_findes_filen_paa_dokument_id(tmp_path: Path):

@@ -73,7 +73,8 @@ def test_db_koer_parses():
         ["db", "koer", "sql/900_afstemning.sql", "--var", "run_id=7", "--var", "boelge=ppr"]
     )
     assert args.db_kommando == "koer"
-    assert str(args.fil) == "sql/900_afstemning.sql"
+    # as_posix(): på Windows bliver stien sql\900_afstemning.sql
+    assert args.fil.as_posix() == "sql/900_afstemning.sql"
     assert args.var == ["run_id=7", "boelge=ppr"]
 
 
