@@ -79,3 +79,50 @@ def test_journalark_og_workflows_bruger_ikke_scpfolder():
     assert "n.[SagsId] + N'/' + n.[DokumentID]" in kode
     assert "w.[SagsId] + N'/' + w.[DokumentID]" in kode
     assert "[ScpFolder]" not in kode
+
+
+# --- kommentarer skal være lukkede ----------------------------------------
+#
+# T-SQL tillader INDLEJREDE blokkommentarer: et "/*" inde i en kommentar
+# åbner en ny. Skriver man "mapping/*.csv" i en kommentar, er filen ét langt,
+# uafsluttet kommentarfelt — "Missing end comment mark '*/'" (16-11-2026,
+# sql/999_testdata_testmiljoe.sql). Python ser intet forkert ved det.
+
+def _kommentar_ubalance(tekst: str) -> str | None:
+    """None hvis balanceret. Strenge og --linjer tæller ikke med."""
+    i, dybde, i_streng = 0, 0, False
+    while i < len(tekst):
+        c, par = tekst[i], tekst[i:i + 2]
+        if dybde == 0 and not i_streng and par == "--":
+            slut = tekst.find("\n", i)
+            i = len(tekst) if slut < 0 else slut
+            continue
+        if dybde == 0 and c == "'":
+            i_streng = not i_streng
+            i += 1
+            continue
+        if not i_streng and par == "/*":
+            dybde += 1
+            i += 2
+            continue
+        if not i_streng and par == "*/":
+            if dybde == 0:
+                return "*/ uden et /* foran"
+            dybde -= 1
+            i += 2
+            continue
+        i += 1
+    return f"{dybde} kommentar(er) åbnet men aldrig lukket" if dybde else None
+
+
+def test_alle_sql_kommentarer_er_lukkede():
+    fejl = {
+        p.name: u for p in sorted(EXTRACT.parent.glob("*.sql"))
+        if (u := _kommentar_ubalance(p.read_text(encoding="utf-8")))
+    }
+    assert not fejl, f"SQL Server afviser: {fejl}. Et '/*' inde i en kommentar åbner en ny."
+
+
+def test_indlejret_kommentar_fanges():
+    assert _kommentar_ubalance("/* se mapping/*.csv */ SELECT 1;")
+    assert not _kommentar_ubalance("/* se mapping\\*.csv */ SELECT '/*';")

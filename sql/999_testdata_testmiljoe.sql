@@ -3,11 +3,11 @@
 
   KUN til fase 2: falske testdata (sql/999_testdata.sql) ind i SBSYS'
   testmiljø. Rører udelukkende de falske GO-værdier (PPR-sag, PPR Nord,
-  ab1234, Active, Closed, Notat) — aldrig de rigtige fra mapping/*.csv.
+  ab1234, Active, Closed, Notat) — aldrig de rigtige fra CSV-filerne i mapping-mappen.
 
   Id'erne er hentet med `konv opslag` mod testmiljøet 16-11-2026. De gælder
   IKKE nødvendigvis i produktion, og derfor står de her og ikke i
-  mapping/*.csv, som også bruges mod produktion.
+  CSV-filerne i mapping-mappen, som også bruges mod produktion.
 
   Koer i denne raekkefoelge, efter en nulstilling:
       uv run konv mapping load
