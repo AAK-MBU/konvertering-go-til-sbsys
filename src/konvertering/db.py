@@ -161,18 +161,22 @@ class Database:
             return markoer.rowcount
 
     def udfoer_mange(self, sql: str, raekker: Sequence[Sequence[Any]],
-                     hurtig: bool = True) -> int:
+                     hurtig: bool = False) -> int:
         """Kør samme sætning for mange rækker. Returnerer berørte rækker.
 
-        ``hurtig=False`` kører én ad gangen. Det er langsommere, men
-        nødvendigt for MERGE: med ``fast_executemany`` binder pyodbc alle
-        parametre efter den FØRSTE rækkes typer og længder, og en MERGE
-        hvis ON-led sammenligner sådan en parameter med en kolonne kan
-        stilfærdigt matche ingenting — ingen fejl, ingen rækker, og et
-        svar der ser vellykket ud.
+        Standard er én række ad gangen, og returværdien er det antal rækker
+        databasen FAKTISK ændrede — så "jeg skrev 16 rækker" ikke kan være
+        usandt.
 
-        Returværdien er antal berørte rækker og ikke antal input-rækker,
-        netop så "jeg skrev 16 rækker" ikke kan være usandt.
+        ``hurtig=True`` bruger pyodbc's ``fast_executemany``. Den er farlig
+        for alt med et WHERE- eller ON-led: pyodbc binder parametrene efter
+        den FØRSTE rækkes typer og længder, og sammenligningen kan
+        stilfærdigt matche ingenting — ingen fejl, ingen rækker. Det er set
+        to gange i dette projekt: en MERGE i ``mapping load``, og 16-11-2026
+        en UPDATE i ``filer scan``, der efterlod fil_status NULL på samtlige
+        dokumenter mens loggen meldte et korrekt resultat. I hurtig tilstand
+        er returværdien derfor bare antallet af input-rækker, IKKE en
+        bekræftelse. Brug den kun til rene INSERT, og kontrollér bagefter.
         """
         if not raekker:
             return 0

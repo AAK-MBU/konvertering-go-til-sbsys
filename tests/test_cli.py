@@ -328,3 +328,55 @@ def test_intet_resultatsaet_giver_ingen_stoej(capsys):
 
     _udskriv_tabel([])
     assert capsys.readouterr().out == ""
+
+
+# --- filscanningens resultat skal faktisk lande ------------------------
+#
+# 16-11-2026: `filer scan` meldte "ok: 3, mangler: 1", men fil_status stod
+# NULL på alle fire dokumenter. UPDATE'en kørte med fast_executemany og
+# matchede ingenting — uden fejl. Dokumentet uden fil kom derfor med på
+# arbejdslisten og blev kun stoppet af kontrollen lige før afsendelse.
+
+class _ScanDb:
+    def __init__(self, beroert: int | None = None) -> None:
+        self.beroert = beroert
+        self.kald: list[dict] = []
+
+    def udfoer_mange(self, sql, raekker, **kw):
+        self.kald.append({"sql": sql, "raekker": raekker, **kw})
+        return len(raekker) if self.beroert is None else self.beroert
+
+
+def test_filstatus_skrives_ikke_med_fast_executemany():
+    from konvertering.cli import _gem_filstatus
+
+    db = _ScanDb()
+    _gem_filstatus(db, [("ok", 1, None, "text/plain", "D1")])
+    assert db.kald[0].get("hurtig", False) is False
+
+
+def test_filstatus_der_ikke_lander_stopper_scanningen():
+    from konvertering.cli import _gem_filstatus
+    from konvertering.sbsys.errors import KonverteringsFejl
+
+    db = _ScanDb(beroert=0)
+    with pytest.raises(KonverteringsFejl) as e:
+        _gem_filstatus(db, [("ok", 1, None, "text/plain", "D1"),
+                            ("mangler", None, None, None, "D2")])
+    assert "0 af 2" in str(e.value)
+
+
+def test_filstatus_der_lander_er_stille():
+    from konvertering.cli import _gem_filstatus
+
+    _gem_filstatus(_ScanDb(), [("ok", 1, None, "text/plain", "D1")])
+
+
+def test_udfoer_mange_er_sikker_som_standard():
+    """Den hurtige tilstand har to gange matchet ingenting uden fejl. Den
+    skal vælges bevidst, ikke være det man får af sig selv."""
+    import inspect
+
+    from konvertering.db import Database
+
+    assert inspect.signature(Database.udfoer_mange).parameters["hurtig"].default is False

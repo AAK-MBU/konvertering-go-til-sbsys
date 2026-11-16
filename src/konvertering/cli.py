@@ -723,9 +723,11 @@ def _db_nulstil(db: Database, args) -> int:
     for tabel, antal in slettet.items():
         if antal:
             log.info("%-20s %8d slettet", tabel, antal)
-    log.info("Konverteringsdatabasen er nulstillet. Bølger og kodelister er bevaret.")
     if args.ogsaa_mapning:
+        log.info("Konverteringsdatabasen er nulstillet. Bølgerne er bevaret.")
         log.warning("Kodelisterne er også ryddet. Kør `konv mapping load` igen.")
+    else:
+        log.info("Konverteringsdatabasen er nulstillet. Bølger og kodelister er bevaret.")
     return 0
 
 
@@ -818,15 +820,30 @@ def _scan_filer(settings: Settings, args) -> int:
 
 
 def _gem_filstatus(db: Database, raekker: list[tuple]) -> None:
-    # COALESCE på checksummen: extract har allerede lagt KILDENS checksum
-    # (Documents.SHACheckSum / DocumentSHA) i fil_sha256. Uden den blev den
-    # overskrevet af vores egen — og med --uden-checksum af NULL, så sporet
-    # tilbage til GO forsvandt ved første hurtige scan. Se B13.
-    if raekker:
-        db.udfoer_mange(
-            "UPDATE stg.dokument SET fil_status = ?, fil_stoerrelse = ?, "
-            "fil_sha256 = COALESCE(fil_sha256, ?), mime = ? WHERE kilde_noegle = ?",
-            raekker,
+    """Skriv scanningens resultat på dokumenterne — og kontrollér at det skete.
+
+    Kørt med fast_executemany matchede UPDATE'en ingenting: fil_status stod
+    NULL på alle dokumenter, mens loggen meldte "ok: 3, mangler: 1". Et
+    dokument uden fil blev derfor stående på arbejdslisten. Nu køres den én
+    række ad gangen, og antallet af ændrede rækker skal gå op.
+
+    COALESCE på checksummen: extract har allerede lagt KILDENS checksum
+    (Documents.SHACheckSum / DocumentSHA) i fil_sha256. Uden den blev den
+    overskrevet af vores egen — og med --uden-checksum af NULL. Se B13.
+    """
+    if not raekker:
+        return
+    beroert = db.udfoer_mange(
+        "UPDATE stg.dokument SET fil_status = ?, fil_stoerrelse = ?, "
+        "fil_sha256 = COALESCE(fil_sha256, ?), mime = ? WHERE kilde_noegle = ?",
+        raekker,
+    )
+    if beroert != len(raekker):
+        raise KonverteringsFejl(
+            f"Filscanningen skrev kun status på {beroert} af {len(raekker)} dokumenter. "
+            f"Resten står uændret i stg.dokument, og et dokument uden fil kan "
+            f"derfor komme med på arbejdslisten. Kør `konv filer scan` igen, og "
+            f"undersøg sagen hvis tallene stadig ikke går op."
         )
 
 
