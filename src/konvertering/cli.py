@@ -709,7 +709,7 @@ def _db_nulstil(db: Database, args) -> int:
     if indlaeste:
         ud = args.ud or Path("rapporter/oprettede-foer-nulstilling.csv")
         ud.parent.mkdir(parents=True, exist_ok=True)
-        kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "boelge", "run_id",
+        kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "sbsys_nummer", "boelge", "run_id",
                     "opdateret"]
         with ud.open("w", encoding="utf-8-sig", newline="") as f:
             skriver = csv.DictWriter(f, fieldnames=kolonner, extrasaction="ignore",
@@ -765,7 +765,7 @@ def _oprettede(settings: Settings, args) -> int:
         return 0
 
     args.ud.parent.mkdir(parents=True, exist_ok=True)
-    kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "boelge", "run_id", "opdateret"]
+    kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "sbsys_nummer", "boelge", "run_id", "opdateret"]
     with args.ud.open("w", encoding="utf-8-sig", newline="") as f:
         skriver = csv.DictWriter(f, fieldnames=kolonner, extrasaction="ignore",
                                  delimiter=";")

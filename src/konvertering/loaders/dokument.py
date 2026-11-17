@@ -139,7 +139,8 @@ class DokumentLoader(Loader[Dokument]):
         # 17-11-2026:
         #   kladde:   ID = 183 (GET /api/kladde/183 finder den),
         #             KladdeID = 199 (GET /api/kladde/199 giver 404).
-        #             At ID også var sagens id (183), var et tilfælde.
+        #             At ID også var sagens id (183), var et tilfælde:
+        #             en kladde nr. 2 på sag 183 fik ID = 185.
         #   dokument: Id = 185 (registreringen), DokumentID = 187.
         # Ingen fallback til KladdeID/DokumentID: det ville gemme et id der
         # ligner det rigtige, men ikke kan bruges til noget.
@@ -150,4 +151,18 @@ class DokumentLoader(Loader[Dokument]):
                 f"SBSYS returnerede intet id fra {navn}",
                 korrelations_id=svar.korrelations_id,
             )
-        return str(dokument_id), None
+        # Kladder og journaliserede dokumenter nummereres hver for sig i
+        # SBSYS: kladde 185 og dokument 185 er to forskellige ting
+        # (testmiljøet 17-11-2026). Begge står som 'dokument' i id_map, så
+        # arten skrives med i sbsys_nummer — ellers kan den der rydder op
+        # ikke se hvilket kald der sletter hvad. Det andet id kommer med,
+        # fordi den endelige sletning af et dokument tager DokumentID.
+        if objekt.er_kladde:
+            beskrivelse = _beskriv("kladde", "KladdeID", krop.get("KladdeID"))
+        else:
+            beskrivelse = _beskriv("journaliseret", "DokumentID", krop.get("DokumentID"))
+        return str(dokument_id), beskrivelse
+
+
+def _beskriv(art: str, felt: str, vaerdi: Any) -> str:
+    return f"{art} {felt}={vaerdi}" if vaerdi else art

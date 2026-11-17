@@ -305,7 +305,7 @@ def test_kladdens_id_er_registreringens_id(tmp_path):
     loader, sendt = _dokumentloader(tmp_path, {"ID": 183, "KladdeID": 199, "SagID": 183})
     d = Dokument(kilde_noegle="K", sag_noegle="S", titel="Udkast", er_kladde=True,
                  fil_sti="S/1.docx", fil_navn="Udkast.docx")
-    assert loader.send(d, loader.payload(d))[0] == "183"
+    assert loader.send(d, loader.payload(d)) == ("183", "kladde KladdeID=199")
     assert sendt[0]["sti"] == "/api/kladde"
 
 
@@ -325,7 +325,7 @@ def test_journaliseret_dokument_bruger_registreringens_id(tmp_path):
     loader, sendt = _dokumentloader(tmp_path, {"Id": 185, "DokumentID": 187})
     d = Dokument(kilde_noegle="D", sag_noegle="S", titel="Indstilling",
                  fil_sti="S/1.docx", fil_navn="Indstilling.docx")
-    assert loader.send(d, loader.payload(d))[0] == "185"
+    assert loader.send(d, loader.payload(d)) == ("185", "journaliseret DokumentID=187")
     assert sendt[0]["sti"] == "/api/dokument/journaliser"
 
 
@@ -337,3 +337,13 @@ def test_dokument_uden_registrerings_id_afvises_frem_for_at_gaette(tmp_path):
                  fil_sti="S/1.docx", fil_navn="Indstilling.docx")
     with pytest.raises(PermanentFejl):
         loader.send(d, loader.payload(d))
+
+
+def test_artens_beskrivelse_uden_det_andet_id(tmp_path):
+    """Mangler KladdeID/DokumentID i svaret, står arten der stadig."""
+    from konvertering.models import Dokument
+
+    loader, _ = _dokumentloader(tmp_path, {"Id": 185})
+    d = Dokument(kilde_noegle="D", sag_noegle="S", titel="Indstilling",
+                 fil_sti="S/1.docx", fil_navn="Indstilling.docx")
+    assert loader.send(d, loader.payload(d)) == ("185", "journaliseret")

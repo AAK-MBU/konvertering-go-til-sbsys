@@ -359,7 +359,7 @@ def oprettede_objekter(
 
     return db.hent_alle(
         f"""
-        SELECT objekt_type, kilde_noegle, sbsys_id, boelge, run_id, opdateret
+        SELECT objekt_type, kilde_noegle, sbsys_id, sbsys_nummer, boelge, run_id, opdateret
         FROM   konv.id_map
         WHERE  {' AND '.join(hvor)}
         ORDER  BY CASE objekt_type
