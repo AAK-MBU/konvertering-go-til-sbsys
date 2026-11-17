@@ -114,6 +114,20 @@ VALUES
     /* Filen findes ikke -> skal give fil_status = 'mangler' */
     ('TEST-DOK-004', 'TEST-SAG-002', 'ppr', N'Bortkommet bilag', N'Notat', '2023-05-05', 'indgaaende', 'PPR-2023-000002-001/99999999.txt', '99999999.txt');
 
+/* --- En kladde ------------------------------------------------------
+   GO's Journaliseret = 0. Skal ende under Kladder i SBSYS — ikke under
+   Dokumenter — via POST /api/kladde. Filnavnet er bevidst et "rigtigt"
+   navn med mellemrum og endelse, saa kladdens Navn, Filnavn og
+   Filendelse kan ses i SBSYS. Filen paa disken hedder 16391285.docx,
+   som dokument-id'et — praecis som paa GO's fileshare. */
+INSERT INTO stg.dokument
+    (kilde_noegle, sag_noegle, boelge, titel, kategori_go, dokument_dato,
+     retning, er_kladde, fil_relativ_sti, fil_navn)
+VALUES
+    ('TEST-DOK-005', 'TEST-SAG-001', 'ppr', N'Udkast til handleplan', N'Notat',
+     '2023-02-10', 'internt', 1,
+     'PPR-2023-000001-001/16391285.docx', N'Udkast til handleplan.docx');
+
 PRINT 'Testdata indlæst:';
 PRINT '  5 sager i boelgen ppr — to af dem skal afvises (manglende mapping)';
 PRINT '  4 dokumenter — et af dem har ingen fil';
