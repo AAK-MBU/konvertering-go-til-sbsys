@@ -10,9 +10,9 @@ foranstaltning;Specialklasse;PPR;;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsa
 foranstaltning;Specialskole;PPR;;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
 foranstaltning;Støtteressourcer;PPR;;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
 foranstaltning;Tale-hørekonsulent;PPR;;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
-foranstaltning;Børnesamtaler;PPR;;PPR;map;Mappetypen; data konverteres, tilbuddet gøres inaktivt efter. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
-foranstaltning;Gruppeforløb - dagtilbud;PPR;;PPR;map;Mappetypen; dagtilbud og skole bliver ét tilbud. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
-foranstaltning;Gruppeforløb - skole;PPR;;PPR;map;Mappetypen; dagtilbud og skole bliver ét tilbud. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Børnesamtaler;PPR;;PPR;map;Mappetypen — data konverteres, tilbuddet gøres inaktivt efter. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Gruppeforløb - dagtilbud;PPR;;PPR;map;Mappetypen — dagtilbud og skole bliver ét tilbud. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Gruppeforløb - skole;PPR;;PPR;map;Mappetypen — dagtilbud og skole bliver ét tilbud. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
 foranstaltning;Back2School;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
 foranstaltning;Basisteam;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
 foranstaltning;Basisteam fortroligt;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;

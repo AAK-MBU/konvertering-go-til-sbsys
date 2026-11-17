@@ -83,3 +83,16 @@ def test_listenavnet_matcher_filnavnet(sti: Path):
             assert raekke["liste"] == sti.stem, (
                 f"{sti.name}: liste={raekke['liste']!r}, men filen hedder {sti.stem}"
             )
+
+
+@pytest.mark.parametrize("sti", sorted(MAPPE.glob("*.csv")), ids=lambda p: p.stem)
+def test_hver_raekke_har_lige_mange_felter(sti: Path):
+    """Et semikolon i en kommentar flytter resten af rækken én kolonne til
+    højre. `mapping load` fejlede 17-11-2026 med "String or binary data
+    would be truncated", fordi kommentarteksten landede i godkendt_af."""
+    with sti.open(encoding="utf-8-sig", newline="") as f:
+        forkerte = [nr for nr, r in enumerate(csv.reader(f, delimiter=";"), 1)
+                    if r and len(r) != len(KOLONNER)]
+    assert not forkerte, (
+        f"{sti.name}: linje {forkerte[:5]} har ikke {len(KOLONNER)} felter — "
+        f"står der et semikolon i en tekst?")
