@@ -277,6 +277,16 @@ def test_notattekst_escapes_som_standard():
     assert "<br>" in tekst, "linjeskift skal bevares, ellers er notatet ulæseligt"
 
 
+def test_notattekst_windows_linjeskift_giver_rent_br():
+    """GO har \\r\\n. Dry-run 17-11-2026 gav '\\r<br>' — \\r blev hængende."""
+    from types import SimpleNamespace
+
+    from konvertering.loaders.notat import NotatLoader
+
+    loader = NotatLoader(SimpleNamespace(endpoints=Endpoints()))
+    assert loader._tekst(SimpleNamespace(tekst="a\r\nb\rc\nd")) == "a<br>b<br>c<br>d"
+
+
 def test_notattekst_kan_vaere_html_allerede():
     from types import SimpleNamespace
 

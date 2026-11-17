@@ -79,7 +79,10 @@ class NotatLoader(Loader[Notat]):
             return raa
         # Linjeskift bevares: uden <br> bliver et flersidet notat til én
         # lang blok, og det er ulæseligt for den der skal bruge det.
-        return html.escape(raa).replace("\n", "<br>")
+        # GO's tekst har Windows-linjeskift (\r\n). Kun \n blev erstattet før,
+        # så \r blev hængende foran hvert <br> (dry-run 17-11-2026).
+        ensartet = raa.replace("\r\n", "\n").replace("\r", "\n")
+        return html.escape(ensartet).replace("\n", "<br>")
 
     def send(self, objekt: Notat, payload: dict[str, Any]) -> tuple[str, str | None]:
         sbsys_sag_id = self.k.idmap.sbsys_id(Objekttype.SAG, objekt.sag_noegle)
