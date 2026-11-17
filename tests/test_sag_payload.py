@@ -273,9 +273,11 @@ def test_eksempelfilen_overskriver_ikke_med_forkerte_felter(tmp_path):
 
 # --- svaret fra SBSYS: hvilket felt er objektets id? -------------------
 #
-# Testmiljøet 16-11-2026: kladden svarede med {"ID": 183, "KladdeID": 199,
-# "SagID": 183}. ID er sagens id. Den første udgave tog ID før KladdeID og
-# registrerede sagen (183) som kladdens id i konv.id_map.
+# Kladder og dokumenter har hver to id'er: registreringens og det
+# underliggende objekts. SBSYS' kald tager registreringens. Testmiljøet
+# 17-11-2026: kladden {"ID": 183, "KladdeID": 199, "SagID": 183} findes med
+# GET /api/kladde/183, mens /199 giver 404. Dokumentet: Id 185, DokumentID 187.
+# (16-11 tog vi fejlagtigt KladdeID, fordi ID tilfældigvis lig SagID.)
 
 def _dokumentloader(tmp_path, svar: dict):
     from konvertering.config import FilIndstillinger
@@ -297,31 +299,41 @@ def _dokumentloader(tmp_path, svar: dict):
     return DokumentLoader(k), sendt
 
 
-def test_kladdens_id_er_kladdeid_ikke_sagens_id(tmp_path):
+def test_kladdens_id_er_registreringens_id(tmp_path):
     from konvertering.models import Dokument
 
     loader, sendt = _dokumentloader(tmp_path, {"ID": 183, "KladdeID": 199, "SagID": 183})
     d = Dokument(kilde_noegle="K", sag_noegle="S", titel="Udkast", er_kladde=True,
                  fil_sti="S/1.docx", fil_navn="Udkast.docx")
-    assert loader.send(d, loader.payload(d))[0] == "199"
+    assert loader.send(d, loader.payload(d))[0] == "183"
     assert sendt[0]["sti"] == "/api/kladde"
 
 
-def test_kladde_uden_kladdeid_afvises_frem_for_at_gaette(tmp_path):
+def test_kladde_uden_registrerings_id_afvises_frem_for_at_gaette(tmp_path):
     from konvertering.models import Dokument
 
-    loader, _ = _dokumentloader(tmp_path, {"ID": 183, "SagID": 183})
+    loader, _ = _dokumentloader(tmp_path, {"KladdeID": 199, "SagID": 183})
     d = Dokument(kilde_noegle="K", sag_noegle="S", titel="Udkast", er_kladde=True,
                  fil_sti="S/1.docx", fil_navn="Udkast.docx")
     with pytest.raises(PermanentFejl):
         loader.send(d, loader.payload(d))
 
 
-def test_journaliseret_dokument_bruger_id(tmp_path):
+def test_journaliseret_dokument_bruger_registreringens_id(tmp_path):
     from konvertering.models import Dokument
 
-    loader, sendt = _dokumentloader(tmp_path, {"Id": 185, "DokumentID": 185})
+    loader, sendt = _dokumentloader(tmp_path, {"Id": 185, "DokumentID": 187})
     d = Dokument(kilde_noegle="D", sag_noegle="S", titel="Indstilling",
                  fil_sti="S/1.docx", fil_navn="Indstilling.docx")
     assert loader.send(d, loader.payload(d))[0] == "185"
     assert sendt[0]["sti"] == "/api/dokument/journaliser"
+
+
+def test_dokument_uden_registrerings_id_afvises_frem_for_at_gaette(tmp_path):
+    from konvertering.models import Dokument
+
+    loader, _ = _dokumentloader(tmp_path, {"DokumentID": 187})
+    d = Dokument(kilde_noegle="D", sag_noegle="S", titel="Indstilling",
+                 fil_sti="S/1.docx", fil_navn="Indstilling.docx")
+    with pytest.raises(PermanentFejl):
+        loader.send(d, loader.payload(d))

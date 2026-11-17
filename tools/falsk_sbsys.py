@@ -89,6 +89,11 @@ class Attrap(BaseHTTPRequestHandler):
         nyt_id = _taeller["id"]
         korrelation = self.headers.get("X-Correlation-Id", "-")
         print(f"  201  {self.path}  id={nyt_id}  {korrelation}")
+        if self.path.split("?", 1)[0].rstrip("/").endswith("/api/kladde"):
+            # Som det rigtige SBSYS: KladdeMetadataDto har "ID" (stort D) =
+            # registreringens id, og "KladdeID" = et andet tal man ikke kan
+            # slaa op paa. Forskellige tal, saa en forveksling opdages.
+            return self._svar(201, {"ID": nyt_id, "KladdeID": nyt_id + 50000})
         self._svar(201, {"Id": nyt_id, "Nummer": f"ATTRAP-{nyt_id}"})
 
     do_PATCH = do_POST
