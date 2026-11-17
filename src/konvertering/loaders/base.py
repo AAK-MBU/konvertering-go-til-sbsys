@@ -229,6 +229,9 @@ class Loader(ABC, Generic[T]):
             self._fil_fejl(e, kilde_noegle, raekke, r)
             return
         except PermanentFejl as e:
+            # Sig HVORFOR med det samme. Uden linjen viste kørslen kun
+            # "fejlet=1", og grunden skulle graves frem med konv status.
+            log.warning("%s %s afvist af SBSYS: %s", self.objekt_type, ref, maskér(str(e))[:400])
             self.k.idmap.markér_fejlet(self.objekt_type, kilde_noegle, maskér(str(e)))
             self._afvis(kilde_noegle, "sbsys_afviste", "blok", maskér(str(e)),
                         boelge=self._boelge(raekke))
@@ -237,6 +240,8 @@ class Loader(ABC, Generic[T]):
         except ForbigaaendeFejl as e:
             # Alle genforsøg er brugt. Objektet forbliver 'pending' og
             # samles op af næste kørsel — ingen manuel oprydning nødvendig.
+            log.warning("%s %s fejlede efter alle genforsøg: %s", self.objekt_type, ref,
+                        maskér(str(e))[:400])
             self.k.idmap.markér_fejlet(self.objekt_type, kilde_noegle, maskér(str(e)))
             r.fejlet += 1
             return

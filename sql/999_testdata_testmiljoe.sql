@@ -42,10 +42,16 @@ WHEN NOT MATCHED THEN
     VALUES (s.liste, s.go_vaerdi, s.sbsys_vaerdi, s.sbsys_tekst, 'map',
             N'TESTMILJØ-id til falske testdata — sql/999_testdata_testmiljoe.sql');
 
-/* Sagsbehandleren: den falske 'ab1234' har intet id i testmiljøet. Uden en
-   vaerdi sendes SagsBehandlerID slet ikke, og SBSYS vælger selv — som
-   regel den der opretter, altså servicekontoen. Ikke blokerende. */
+/* Sagsbehandleren. SKAL medsendes for skabeloner der beskytter sagen:
+   "Sagen skal beskyttes, men skabelonen angiver ikke en behandler.
+   Behandler skal derfor medsendes" (HTTP 400, testmiljøet 16-11-2026,
+   skabelon 2 "PPRsag - psykolog"). Brug servicekontoens eget bruger-id —
+   ikke en medarbejders. Find det med:
+       '{"LogonId": "svc_rpa_sbsys01"}' | Out-File -Encoding utf8 soeg-bruger.json
+       uv run konv kald POST /api/bruger/search --krop soeg-bruger.json --jatak
+   og giv det med:  --var behandler=<Id>
+   Uden --var behandler sendes SagsBehandlerID ikke. */
 UPDATE map.kodeliste
-SET    sbsys_vaerdi = NULL,
-       kommentar    = N'Bevidst tom i testmiljøet — SBSYS vælger sagsbehandler'
+SET    sbsys_vaerdi = NULLIF(N'$(behandler|)', N''),
+       kommentar    = N'TESTMILJØ: servicekontoens bruger-id — sql/999_testdata_testmiljoe.sql'
 WHERE  liste = 'bruger' AND go_vaerdi = N'ab1234';

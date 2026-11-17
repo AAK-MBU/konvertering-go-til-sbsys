@@ -148,3 +148,21 @@ def test_graensen_gaelder_ikke_naar_en_fil_er_fundet():
 
     assert r.indlaest == 1
     assert r.afvist == len(noegler) - 1
+
+
+def test_sbsys_afvisning_logges_med_grunden(caplog):
+    """16-11-2026: kørslen viste kun "fejlet=1". Grunden — en 400 med
+    "Behandler skal derfor medsendes" — skulle graves frem med konv status."""
+    from konvertering.sbsys.errors import PermanentFejl
+
+    loader = _loader(set())
+
+    def afvis(objekt, payload):
+        raise PermanentFejl("opret_sag: HTTP 400 — Behandler skal derfor medsendes")
+
+    loader.send = afvis  # type: ignore[method-assign]
+    with caplog.at_level("WARNING"):
+        r = _koer(loader, ["d001"])
+
+    assert r.fejlet == 1
+    assert "Behandler skal derfor medsendes" in caplog.text
