@@ -132,9 +132,14 @@ class DokumentLoader(Loader[Dokument]):
             kontekst={"objekt_type": "dokument", "kilde_noegle": objekt.kilde_noegle},
         )
         krop = svar.krop or {}
-        # Kladden svarer med ID/KladdeID, dokumentet med Id/DokumentId.
-        dokument_id = (krop.get("Id") or krop.get("id") or krop.get("DokumentId")
-                       or krop.get("ID") or krop.get("KladdeID"))
+        if objekt.er_kladde:
+            # KladdeMetadataDto har BÅDE "ID" og "KladdeID". Testmiljøet
+            # 16-11-2026: ID = 183 = SagID, KladdeID = 199 = kladden. Den
+            # første udgave tog ID først og gemte sagens id som kladdens.
+            dokument_id = krop.get("KladdeID")
+        else:
+            # DokumentMetadataDtoV15: Id (og DokumentID).
+            dokument_id = krop.get("Id") or krop.get("id") or krop.get("DokumentID")
         if not dokument_id:
             raise PermanentFejl(
                 f"SBSYS returnerede intet id fra {navn}",
