@@ -150,7 +150,10 @@ class SbsysKlient:
                     varighed, forsoeg, kontekst, None,
                 )
 
-                if svar.status_code in (401, 403):
+                # Undtagen når kalderen eksplicit venter 401/403: `konv kald`
+                # skal kunne VISE afvisningen — kroppen og www-authenticate
+                # siger hvorfor tokenet afvises (BU-API'et 17-11-2026).
+                if svar.status_code in (401, 403) and svar.status_code not in forventede_status:
                     raise AutentifikationsFejl(
                         f"SBSYS afviste servicekontoen (HTTP {svar.status_code})",
                         http_status=svar.status_code,
