@@ -8,3 +8,6 @@ sbsys/endpoints.toml
 .ruff_cache/
 
 docs/
+
+soeg-bruger.json
+soeg-kladde.json
