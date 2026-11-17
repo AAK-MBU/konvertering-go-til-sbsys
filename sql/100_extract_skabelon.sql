@@ -30,8 +30,8 @@
     stg.notat     JournalNotes.DokumentID   GO's eget id
     stg.part      CPR eller CVR             Contacts har INGEN stabil egen
                                             noegle — se afsnit 3
-    stg.indsats   sammensat                 Foranstaltningsdata har heller
-                                            ingen — se afsnit 5
+    stg.indsats   SagsId + fingeraftryk     Foranstaltningsdata har heller
+                  af hele raekken + nr.     ingen — se afsnit 6
 
   ---------------------------------------------------------------------
   TRE FUND DER AENDRER ANTAGELSER
@@ -396,85 +396,128 @@ WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId]);
 /* 6) Indsatser                                                        */
 /* ================================================================== */
 /*
-  Foranstaltningsdata.ID er IDENTITY og ubrugelig som noegle. Der er
-  ingen anden kandidat i tabellen, saa noeglen SAMMENSAETTES af de felter
-  der goer raekken unik: sag + indholdstype + ydelse + periodestart.
+  Foranstaltningsdata.ID er IDENTITY og ubrugelig som noegle — den
+  nummereres om ved hvert dump. Der er ingen anden kandidat i tabellen.
 
-  Det er svagere end en GUID. To indsatser paa samme sag med samme ydelse
-  og samme startdato ville kollidere — og en kollision her betyder at den
-  ene indsats forsvinder lydloest. Derfor taelles dubletter FOER
-  indlaesningen, og kørslen stopper hvis der er nogen. Se B14.
+  Noeglen er derfor:   <SagsId>|<fingeraftryk>|<n>
 
-  Datoerne Fra og Til er nvarchar(256), ikke datoer, og de staar som
-  dd-mm-aaaa (bekraeftet 16-11-2026: 437 af 1777 Fra-vaerdier havde en dag
-  over 12 i foerste felt). Formatet SKAL angives (stil 105): uden det
-  laeser SQL Server efter serverens sprog, og med us_english/mdy bliver
-  05-03-2021 lydloest til 3. maj. Det er en forkert dato, ikke en fejl —
-  den ville ende i SBSYS som en indsats med forkert periode.
+  * fingeraftryk = SHA-256 af ALLE raekkens kolonner undtagen ID og SagsId.
+    To raekker der adskiller sig i bare ét felt, faar hver sin noegle.
+  * n nummererer raekker der er ens i ALLE felter (aegte dubletter i GO).
+    Det er ligegyldigt hvilken der bliver 1 og 2 — de er ens.
 
-  TRY_CONVERT giver NULL paa det der stadig ikke kan tolkes, og de raekker
-  fanges af ValideringsFejl 'mangler_periode' i loaderen frem for at blive
-  gaettet.
+  Hvorfor ikke sag+type+ydelse+fra som foer? Profileringen af testdumpet
+  (sql/105, 17-11-2026) viste 63 raekker der delte den noegle med en anden.
+  De blev udeladt af stg.indsats. Selv med alle ABA-felter i noeglen
+  kolliderede 26, og 16 raekker var ens i ALT.
+
+  Ulempen: aendres et felt i GO mellem to dumps, faar raekken en ny noegle,
+  og den gamle indsats i SBSYS kendes ikke igen. Det gjaldt ogsaa den gamle
+  noegle (en rettet Fra-dato), og den rigtige konvertering koeres paa ét
+  dump. Kolonnelisten staar eksplicit: mangler en kolonne i et senere dump,
+  skal extract fejle hoejlydt frem for at regne et andet fingeraftryk.
+
+  COALESCE(N'1' + x, N'0') skelner NULL fra tom tekst; NCHAR(31) (unit
+  separator) skiller felterne. CONCAT og ikke CONCAT_WS, som kraever
+  SQL Server 2017, saa 'ab'+'c' ikke bliver 'a'+'bc'.
+
+  AABENT (17-11-2026): skal aegte dubletter blive til én indsats eller to?
+  Indtil det er afgjort, kommer alle med — der tabes intet.
+
+  Datoerne Fra og Til er nvarchar(256) i formatet dd-mm-aaaa (bekraeftet
+  16-11 og 17-11-2026: 1777 Fra, 1472 Til, 1590 Visiteret, ingen afvigere).
+  Formatet SKAL angives (stil 105): serveren er us_english/mdy, og uden
+  stil bliver 05-03-2021 lydloest til 3. maj.
+
+  En tom Fra-dato er IKKE en fejl her. Konverteringsarket siger at den
+  skal blive 1900-01-01; det goer loaderen, saa stg.indsats viser sandheden.
 */
 DELETE FROM stg.indsats;
 
 ;WITH kandidater AS (
     SELECT
-        noegle = CONVERT(VARCHAR(200),
-                     f.[SagsId] + '|' + COALESCE(f.[Indholdstype], N'')
-                               + '|' + COALESCE(f.[Ydelse], N'')
-                               + '|' + COALESCE(CONVERT(VARCHAR(10),
-                                          TRY_CONVERT(DATE, f.[Fra], 105), 23), N'')),
+        fingeraftryk = CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', CONCAT(
+                COALESCE(N'1' + f.[Indholdstype], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Visiteret], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Fra], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Til], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Sagsbehandler], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[ABAGruppe], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Ydelse], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[SkoleEllerInstitution], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Betalingssted], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Timer], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[VisiteretTilTilbud], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Visitationsteam], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Specialundervisningstilbud], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[TypeAfEnkelteIntegration], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Betalingskommune], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Skoleaar], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Faggruppe], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Indsats], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Institutionsnavn], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Aarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[HenvisningsAarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Klassetrin], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Klassebetegnelse], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Skole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[NavnPaaSkole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bopaelsoplysning], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[AndenBetalingskommune], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[EkstraBevilling], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[IndstilletAf], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Indstillingsaarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Aktivitet], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[BetegnelseSpecialklasse], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[FritSkolevalg], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[NavnPaaSpecialskole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[BetegnelseSpecialskole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bevillingstype], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Institutionstype], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bevillingssted], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bevillingsaarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Emneliste], N'0')
+        )), 2),
         f.*
     FROM GOStaging.dbo.[Foranstaltningsdata] AS f
+),
+nummereret AS (
+    SELECT
+        noegle = CONVERT(VARCHAR(200),
+                     k.[SagsId] + '|' + k.fingeraftryk + '|'
+                     + CONVERT(VARCHAR(10), ROW_NUMBER() OVER (
+                           PARTITION BY k.[SagsId], k.fingeraftryk ORDER BY k.[ID]))),
+        k.*
+    FROM kandidater AS k
 )
 INSERT INTO stg.indsats (
-    kilde_noegle, sag_noegle, ydelse_go, bevillingstype_go,
+    kilde_noegle, sag_noegle, indholdstype_go, ydelse_go, bevillingstype_go,
     periode_start, periode_slut, enhedstype_go, udslagsgivende_go, raa_json
 )
 SELECT
-    k.noegle,
-    k.[SagsId],
-    k.[Ydelse],
-    k.[Bevillingstype],
-    TRY_CONVERT(DATETIME2(3), k.[Fra], 105),
-    TRY_CONVERT(DATETIME2(3), k.[Til], 105),
-    /* Timer er fritekst ("4 timer ugentligt"). Antal og enhed kan ikke
-       udledes forsvarligt, og et gaet her bliver til en bevilling.
-       Lades tom indtil E2b er afklaret; vaerdien er bevaret i raa_json. */
+    n.noegle,
+    n.[SagsId],
+    n.[Indholdstype],
+    n.[Ydelse],
+    n.[Bevillingstype],
+    TRY_CONVERT(DATETIME2(3), n.[Fra], 105),
+    TRY_CONVERT(DATETIME2(3), n.[Til], 105),
+    /* Timer staar som timer:minutter ("7:30"). Om 4:45 er 4,75 eller 4,45
+       timer, er ikke afgjort (17-11-2026). Lades tom; vaerdien er bevaret
+       i raa_json. */
     NULL,
-    COALESCE(k.[HenvisningsAarsag], k.[Aarsag]),
-    (SELECT k.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
-FROM   kandidater AS k
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = k.[SagsId])
-  AND  k.noegle IN (
-        SELECT noegle FROM kandidater GROUP BY noegle HAVING COUNT(*) = 1
-  );
+    COALESCE(n.[HenvisningsAarsag], n.[Aarsag]),
+    (SELECT n.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
+FROM   nummereret AS n
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId]);
 
-/* Kollisioner: raekker der IKKE kom med, fordi den sammensatte noegle
-   ramte mere end én. De er ikke tabt — de er udeladt med vilje, og de
-   skal ses af et menneske. */
-IF EXISTS (
-    SELECT 1 FROM GOStaging.dbo.[Foranstaltningsdata] f
-    GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra], 105)
-    HAVING COUNT(*) > 1
-)
-BEGIN
-    DECLARE @dubletter INT = (
-        SELECT COUNT(*) FROM (
-            SELECT 1 AS x FROM GOStaging.dbo.[Foranstaltningsdata] f
-            GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra], 105)
-            HAVING COUNT(*) > 1
-        ) AS d);
-    /* Beskeden bygges i en variabel. T-SQL saetter ikke to strenge sammen
-       fordi de staar ved siden af hinanden (det gav Msg 102), og RAISERROR
-       tager kun en literal eller en variabel — ikke et udtryk med +. */
-    DECLARE @kollisionsbesked NVARCHAR(400) =
-        N'Foranstaltningsdata: %d noeglekollisioner. Den sammensatte noegle '
-        + N'(sag+indholdstype+ydelse+fra) er ikke unik. De kolliderende '
-        + N'raekker er IKKE lagt i stg.indsats. Se B14 i docs/04-aabne-spoergsmaal.md.';
-    RAISERROR(@kollisionsbesked, 16, 1, @dubletter);
-END
+/* Til orientering: hvor mange aegte dubletter kom med som nr. 2, 3 ... */
+DECLARE @aegte_dubletter INT =
+    (SELECT COUNT(*) FROM stg.indsats WHERE kilde_noegle NOT LIKE '%|1');
+IF @aegte_dubletter > 0
+    PRINT N'Foranstaltningsdata: ' + CONVERT(NVARCHAR(10), @aegte_dubletter)
+        + N' raekker er ens i ALLE felter med en anden paa samme sag. '
+        + N'De er kommet med som selvstaendige indsatser (se kommentaren ovenfor).';
 
 /* ================================================================== */
 /* 7) Boelgen arves nedad                                              */
@@ -504,9 +547,10 @@ USING (
     UNION SELECT DISTINCT 'bruger',          ansvarlig_go  FROM stg.sag      WHERE ansvarlig_go IS NOT NULL
     UNION SELECT DISTINCT 'afdeling',        afdeling_go   FROM stg.sag      WHERE afdeling_go IS NOT NULL
     UNION SELECT DISTINCT 'dokumentkategori', kategori_go  FROM stg.dokument WHERE kategori_go IS NOT NULL
-    UNION SELECT DISTINCT 'paragraf',        bevillingstype_go FROM stg.indsats WHERE bevillingstype_go IS NOT NULL
-    UNION SELECT DISTINCT 'foranstaltning',  ydelse_go     FROM stg.indsats  WHERE ydelse_go IS NOT NULL
-    UNION SELECT DISTINCT 'tilbud',          ydelse_go     FROM stg.indsats  WHERE ydelse_go IS NOT NULL
+    /* Indsatsens tripel slaas alle tre op paa mappetypen */
+    UNION SELECT DISTINCT 'paragraf',        indholdstype_go FROM stg.indsats WHERE indholdstype_go IS NOT NULL
+    UNION SELECT DISTINCT 'foranstaltning',  indholdstype_go FROM stg.indsats WHERE indholdstype_go IS NOT NULL
+    UNION SELECT DISTINCT 'tilbud',          indholdstype_go FROM stg.indsats WHERE indholdstype_go IS NOT NULL
     UNION SELECT DISTINCT 'udslagsgivende_forhold', udslagsgivende_go FROM stg.indsats WHERE udslagsgivende_go IS NOT NULL
     /* Boelgetildelingen: omraadet, og enheden for ELM's seks */
     UNION SELECT DISTINCT 'boelge',          organisering_go FROM stg.sag    WHERE organisering_go IS NOT NULL

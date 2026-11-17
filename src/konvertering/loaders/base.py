@@ -36,6 +36,7 @@ from ..sbsys.errors import (
     ForbigaaendeFejl,
     KonverteringsFejl,
     PermanentFejl,
+    UdeladtMedVilje,
     VaertsnavnFejl,
     ValideringsFejl,
 )
@@ -177,6 +178,13 @@ class Loader(ABC, Generic[T]):
         try:
             objekt = self.byg(raekke)
             payload = self.payload(objekt)
+        except UdeladtMedVilje as e:
+            # En beslutning, ikke en fejl. Intet skrives i id_map: ændres
+            # mapningen fra 'ignorer' til 'map', skal objektet med i næste
+            # kørsel uden at nogen først skal nulstille det.
+            log.debug("%s %s udeladt med vilje: %s", self.objekt_type, ref, e)
+            r.sprunget_over += 1
+            return
         except ValideringsFejl as e:
             self._afvis(kilde_noegle, e.regel, "blok", str(e), e.felt, e.vaerdi,
                         boelge=self._boelge(raekke))

@@ -194,8 +194,12 @@ CREATE TABLE stg.indsats (
     kilde_noegle        VARCHAR(200)  NOT NULL PRIMARY KEY,
     sag_noegle          VARCHAR(200)  NOT NULL,
     boelge              VARCHAR(40)   NULL,
-    /* GO's Ydelse og Bevillingstype — oversaettes til SBSYS' tripel
-       (paragraf, foranstaltning, tilbud) via kodelisterne. */
+    /* Foranstaltningsmappens type (Psykolog, ABA ...). Den bestemmer SBSYS'
+       tripel (paragraf, foranstaltning, tilbud) via kodelisterne — tilbuddet
+       ER mappetypen (konverteringsarket 17-11-2026). */
+    indholdstype_go     NVARCHAR(256) NULL,
+    /* Ydelse og Bevillingstype er almindelige tilbudsfelter (paa hhv. ABA
+       og Stoetteressourcer), ikke tripellet. Gemt til tilbudsfelterne. */
     ydelse_go           NVARCHAR(200) NULL,
     bevillingstype_go   NVARCHAR(200) NULL,
     periode_start       DATETIME2(3)  NULL,
@@ -208,6 +212,12 @@ CREATE TABLE stg.indsats (
     raa_json            NVARCHAR(MAX) NULL,
     indlaest            DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
 );
+GO
+
+/* Til databaser hvor stg.indsats blev oprettet foer indholdstype_go fandtes.
+   EFTER CREATE TABLE og FOER viewet, som udfolder i.* naar det oprettes. */
+IF COL_LENGTH('stg.indsats', 'indholdstype_go') IS NULL
+    ALTER TABLE stg.indsats ADD indholdstype_go NVARCHAR(256) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes

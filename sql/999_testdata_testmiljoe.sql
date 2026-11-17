@@ -3,7 +3,7 @@
 
   KUN til fase 2: falske testdata (sql/999_testdata.sql) ind i SBSYS'
   testmiljø. Rører udelukkende de falske GO-værdier (PPR-sag, PPR Nord,
-  ab1234, Active, Closed, Notat, SEL 11.3, Psykologsamtaler) — aldrig de rigtige fra CSV-filerne i mapping-mappen.
+  ab1234, Active, Closed, Notat, Psykolog) — aldrig de rigtige fra CSV-filerne i mapping-mappen.
 
   Id'erne er hentet med `konv opslag` mod testmiljøet 16-11-2026. De gælder
   IKKE nødvendigvis i produktion, og derfor står de her og ikke i
@@ -30,12 +30,12 @@ USING (VALUES
     ('sagsstatus',       N'Active',   N'$(status_aaben|6)',  N'Åben'),
     ('sagsstatus',       N'Closed',   N'$(status_lukket|3)', N'Lukket'),
     ('dokumentkategori', N'Notat',    N'$(dokumentart|5)', N'Notat'),
-    /* Indsatsens tripel skal findes i BU-kataloget (konv opslag katalog,
-       testmiljøet 17-11-2026): paragraf 4 "." -> foranstaltning 4 "PPR"
-       -> tilbud 1 "Psykolog". Paragrafen hedder bare "." i testmiljøet. */
-    ('paragraf',         N'SEL 11.3',         N'$(paragraf|4)',       N'.'),
-    ('foranstaltning',   N'Psykologsamtaler', N'$(foranstaltning|4)', N'PPR'),
-    ('tilbud',           N'Psykologsamtaler', N'$(tilbud|1)',         N'Psykolog')
+    /* Indsatsens tripel slaas op paa mappetypen (her Psykolog) og skal
+       findes i BU-kataloget (konv opslag katalog, testmiljøet 09-11-2026):
+       paragraf 4 "." -> foranstaltning 4 "PPR" -> tilbud 1 "Psykolog". */
+    ('paragraf',         N'Psykolog', N'$(paragraf|4)',       N'.'),
+    ('foranstaltning',   N'Psykolog', N'$(foranstaltning|4)', N'PPR'),
+    ('tilbud',           N'Psykolog', N'$(tilbud|1)',         N'Psykolog')
 ) AS s (liste, go_vaerdi, sbsys_vaerdi, sbsys_tekst)
 ON t.liste = s.liste AND t.go_vaerdi = s.go_vaerdi
 WHEN MATCHED THEN UPDATE SET

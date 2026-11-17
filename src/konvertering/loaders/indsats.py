@@ -24,16 +24,28 @@ filtrere på det, så et tabt svar kan opdages uden et felt i SBSYS.
 blokerende: uden dem afvises indsatsen til `konv.afvist`, en fagperson
 udfylder kodelisten, og næste kørsel tager den med. Det er samme
 reparationssløjfe som for KLE på sagerne.
+
+Konverteringsarket (17-11-2026) gav tre regler mere:
+
+**Tilbuddet ER foranstaltningsmappens type** (GO's ``Indholdstype``:
+Psykolog, ABA ...). Alle tre id'er i tripellet slås op på typen. GO's
+``Ydelse`` og ``Bevillingstype`` er almindelige tilbudsfelter, ikke tripellet.
+
+**En tom Fra-dato bliver 1900-01-01** — ikke en afvisning.
+
+**Nogle typer konverteres ikke** ("data skal IKKE konverteres"). De står i
+kodelisten med ``handling = ignorer`` og springes over.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 from ..models import Indsats, Objekttype
-from ..sbsys.errors import PermanentFejl, ValideringsFejl
+from ..sbsys.errors import PermanentFejl, UdeladtMedVilje, ValideringsFejl
 from .base import Loader, boelge_filter
 
 log = logging.getLogger(__name__)
@@ -41,6 +53,10 @@ log = logging.getLogger(__name__)
 # SBSYS' egne enhedstyper. Andre værdier afvises frem for at blive gættet
 # på: "timer" og "Time" er ikke det samme for en .NET-enum.
 ENHEDSTYPER = ("Time", "Doegn", "Uge", "Maaned", "Aar", "Stk")
+
+# Konverteringsarket: "Hvis feltet er tomt i GO, skal fiktiv dato sættes
+# 1900-01-01 00:00:00" — for alle typer.
+FIKTIV_STARTDATO = datetime(1900, 1, 1)
 
 
 class IndsatsLoader(Loader[Indsats]):
@@ -59,14 +75,18 @@ class IndsatsLoader(Loader[Indsats]):
     def byg(self, raekke: dict[str, Any]) -> Indsats:
         m = self.k.kodelister
         enhed = (raekke.get("enhedstype_go") or "").strip()
+        typen = raekke.get("indholdstype_go")
+        if m.er_udeladt("tilbud", typen):
+            raise UdeladtMedVilje(f"foranstaltningstypen '{typen}' konverteres ikke")
         return Indsats(
             kilde_noegle=str(raekke["kilde_noegle"]),
             sag_noegle=str(raekke["sag_noegle"]),
             # Alle tre er blokerende: SBSYS kan ikke oprette en indsats uden.
-            paragraf=m.slaa_op("paragraf", raekke.get("bevillingstype_go"), paakraevet=True),
-            foranstaltning=m.slaa_op("foranstaltning", raekke.get("ydelse_go"), paakraevet=True),
-            tilbud=m.slaa_op("tilbud", raekke.get("ydelse_go"), paakraevet=True),
-            periode_start=raekke.get("periode_start"),
+            # Og alle tre slås op på mappetypen — tilbuddet ER typen.
+            paragraf=m.slaa_op("paragraf", typen, paakraevet=True),
+            foranstaltning=m.slaa_op("foranstaltning", typen, paakraevet=True),
+            tilbud=m.slaa_op("tilbud", typen, paakraevet=True),
+            periode_start=raekke.get("periode_start") or FIKTIV_STARTDATO,
             periode_slut=raekke.get("periode_slut"),
             antal_enheder=raekke.get("antal_enheder"),
             enhedstype=m.slaa_op("enhedstype", enhed, paakraevet=False) or (
@@ -151,7 +171,8 @@ class IndsatsLoader(Loader[Indsats]):
         return str(indsats_id), None
 
     def _find_identisk(self, krop: dict[str, Any]) -> str | None:
-        """Findes indsatsen allerede på sagen, med samme tripel og startdato?
+        """Findes indsatsen allerede på sagen — oprettet af en tidligere
+        kørsel, hvis svar gik tabt før id'et blev gemt?
 
         Spørger sagen om dens egne indsatser
         (``GET /bu_api/sag/{sagId}/sag_foranstaltninger``) frem for at søge.
@@ -159,10 +180,20 @@ class IndsatsLoader(Loader[Indsats]):
         kriteriernes navne; sagens egen liste kræver kun et sags-id vi i
         forvejen har, og den er formålsbygget til netop dette spørgsmål.
 
+        Et træf er samme tilbud, paragraf, startdato og — hvis SBSYS oplyser
+        den — slutdato. Det er IKKE nok i sig selv: to forskellige GO-
+        foranstaltninger af samme type på samme sag kan have samme periode
+        (testdumpet 17-11-2026: 63 rækker delte den gamle nøgle). Derfor
+        fjernes de træf, konverteringen allerede KENDER fra id_map. De er
+        søskende, der allerede er oprettet, ikke den tabte.
+
         Returns:
-            SBSYS-id'et hvis præcis ét træf matcher, ellers None. Flere træf
-            behandles som "ved ikke": det er bedre at lade den fejle end at
-            genbruge den forkerte af to ens indsatser.
+            SBSYS-id'et hvis præcis ét ukendt træf er tilbage, ellers None.
+
+        Raises:
+            PermanentFejl: flere ukendte træf. At genbruge det ene ville være
+                et gæt, og at oprette endnu én ville måske give en dublet.
+                Indsatsen stopper og skal ses af et menneske.
         """
         if self.k.bu_klient is None:
             return None
@@ -178,14 +209,42 @@ class IndsatsLoader(Loader[Indsats]):
         if svar.status != 200:
             return None
 
-        start = str(krop["periodeStart"])[:10]
         traef = [
             r for r in self.k.endpoints.soegningstraef(svar.krop)
-            if isinstance(r, dict)
-            and r.get("tilbudId") == krop["tilbudId"]
-            and r.get("paragrafId") == krop["paragrafId"]
-            and str(r.get("startDato") or r.get("periodeStart") or "")[:10] == start
+            if isinstance(r, dict) and r.get("id") and _samme_indsats(r, krop)
         ]
-        if len(traef) == 1 and traef[0].get("id"):
-            return str(traef[0]["id"])
-        return None
+        if not traef:
+            return None
+
+        kendte = self.k.idmap.kendte_sbsys_id(
+            Objekttype.INDSATS, [str(r["id"]) for r in traef])
+        ukendte = [r for r in traef if str(r["id"]) not in kendte]
+        if not ukendte:
+            return None
+        if len(ukendte) == 1:
+            return str(ukendte[0]["id"])
+        raise PermanentFejl(
+            f"Sagen har {len(ukendte)} ens indsatser i SBSYS, som konverteringen "
+            f"ikke selv har registreret. Kan ikke afgøre om én af dem er denne."
+        )
+
+
+def _dato(r: dict[str, Any], *navne: str) -> str | None:
+    """Første datofelt der findes i svaret, som ÅÅÅÅ-MM-DD. None hvis ingen
+    af navnene findes; tom tekst hvis feltet findes men er tomt."""
+    for navn in navne:
+        if navn in r:
+            return str(r[navn] or "")[:10]
+    return None
+
+
+def _samme_indsats(r: dict[str, Any], krop: dict[str, Any]) -> bool:
+    if r.get("tilbudId") != krop["tilbudId"] or r.get("paragrafId") != krop["paragrafId"]:
+        return False
+    if (_dato(r, "startDato", "periodeStart") or "") != str(krop["periodeStart"])[:10]:
+        return False
+    # Slutdatoen sammenlignes kun hvis svaret har feltet. Ellers ville et
+    # ukendt feltnavn få hver eneste indsats til at se ny ud — og give en
+    # dublet ved hver genkørsel.
+    slut = _dato(r, "slutDato", "periodeSlut")
+    return slut is None or slut == str(krop.get("periodeSlut") or "")[:10]

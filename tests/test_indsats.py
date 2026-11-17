@@ -20,10 +20,16 @@ from typing import Any
 
 import pytest
 
-from konvertering.loaders.indsats import ENHEDSTYPER, IndsatsLoader
+from konvertering.loaders.indsats import ENHEDSTYPER, FIKTIV_STARTDATO, IndsatsLoader
+from konvertering.mapping import Kodelister, Opslag
 from konvertering.models import Indsats
 from konvertering.sbsys.endpoints import Endpoints
-from konvertering.sbsys.errors import ValideringsFejl
+from konvertering.sbsys.errors import (
+    ManglerMapping,
+    PermanentFejl,
+    UdeladtMedVilje,
+    ValideringsFejl,
+)
 
 
 def _loader(**kontekst: Any) -> IndsatsLoader:
@@ -115,7 +121,7 @@ def test_uden_bu_base_url_afvises_med_en_forklaring():
 # foranstaltning, tilbud og startdato. Uden den kontrol ville et tabt svar
 # give en dublet ved næste kørsel.
 
-def _med_soegesvar(traef: list[dict]) -> IndsatsLoader:
+def _med_soegesvar(traef: list[dict], kendte: set[str] | None = None) -> IndsatsLoader:
     kaldte: list[str] = []
 
     class Klient:
@@ -123,7 +129,8 @@ def _med_soegesvar(traef: list[dict]) -> IndsatsLoader:
             kaldte.append(sti)
             return SimpleNamespace(status=200, krop=traef, korrelations_id="x")
 
-    loader = _loader(bu_klient=Klient())
+    idmap = SimpleNamespace(kendte_sbsys_id=lambda _t, ider: {i for i in ider if i in (kendte or set())})
+    loader = _loader(bu_klient=Klient(), idmap=idmap)
     loader.kaldte = kaldte  # type: ignore[attr-defined]
     return loader
 
@@ -147,11 +154,43 @@ def test_anden_startdato_er_en_anden_indsats():
     assert loader._find_identisk(_KROP) is None
 
 
-def test_flere_ens_traef_giver_ikke_et_gaet():
-    """To ens indsatser: at vælge den ene ville hægte alt efterfølgende på
-    den forkerte. Bedre at lade den fejle."""
+def test_flere_ukendte_ens_traef_stopper_indsatsen():
+    """To ens indsatser som vi ikke selv har registreret: at vælge den ene
+    ville være et gæt, og at oprette endnu én måske en dublet."""
     r = {"id": 77, "tilbudId": 3, "paragrafId": 1, "startDato": "2023-02-01T00:00:00"}
-    assert _med_soegesvar([r, {**r, "id": 78}])._find_identisk(_KROP) is None
+    with pytest.raises(PermanentFejl):
+        _med_soegesvar([r, {**r, "id": 78}])._find_identisk(_KROP)
+
+
+# Testdumpet 17-11-2026: to forskellige GO-foranstaltninger af samme type på
+# samme sag kan have samme periode. Den første må ikke "genbruges" som den
+# anden — så ville den anden aldrig blive oprettet, og ingen fejl ville vise det.
+
+def test_allerede_oprettet_soeskende_genbruges_ikke():
+    r = {"id": 77, "tilbudId": 3, "paragrafId": 1, "startDato": "2023-02-01T00:00:00"}
+    assert _med_soegesvar([r], kendte={"77"})._find_identisk(_KROP) is None
+
+
+def test_den_tabte_findes_blandt_kendte_soeskende():
+    """77 er oprettet og registreret; 78 blev oprettet, men svaret gik tabt."""
+    r = {"id": 77, "tilbudId": 3, "paragrafId": 1, "startDato": "2023-02-01T00:00:00"}
+    loader = _med_soegesvar([r, {**r, "id": 78}], kendte={"77"})
+    assert loader._find_identisk(_KROP) == "78"
+
+
+def test_anden_slutdato_er_en_anden_indsats():
+    r = {"id": 77, "tilbudId": 3, "paragrafId": 1, "startDato": "2023-02-01T00:00:00",
+         "slutDato": "2023-06-30T00:00:00"}
+    krop = {**_KROP, "periodeSlut": "2023-12-31T00:00:00"}
+    assert _med_soegesvar([r])._find_identisk(krop) is None
+
+
+def test_ukendt_slutdatofelt_giver_ikke_dubletter():
+    """Har svaret slet ikke et slutdatofelt, sammenlignes der ikke på det —
+    ellers så hver indsats ny ud, og hver genkørsel gav en dublet."""
+    r = {"id": 77, "tilbudId": 3, "paragrafId": 1, "startDato": "2023-02-01T00:00:00"}
+    krop = {**_KROP, "periodeSlut": "2023-12-31T00:00:00"}
+    assert _med_soegesvar([r])._find_identisk(krop) == "77"
 
 
 def test_opslaget_afgraenses_til_sagen():
@@ -169,6 +208,67 @@ def test_periodestart_taeller_ogsaa_som_startdato():
         {"id": 77, "tilbudId": 3, "paragrafId": 1, "periodeStart": "2023-02-01T00:00:00"}
     ])
     assert loader._find_identisk(_KROP) == "77"
+
+
+# --- konverteringsarket 17-11-2026 ----------------------------------
+#
+# Tilbuddet ER mappetypen (Indholdstype). Tom Fra-dato bliver 1900-01-01.
+# Typer der ikke skal konverteres, står med handling = ignorer.
+
+def _kodelister(**typer: str | None) -> Kodelister:
+    """typer: GO-type -> id (samme id i alle tre lister), eller None = ignorer."""
+    poster = {}
+    for typ, vaerdi in typer.items():
+        for liste in ("paragraf", "foranstaltning", "tilbud"):
+            poster[(liste, typ)] = (Opslag(None, "ignorer") if vaerdi is None
+                                    else Opslag(vaerdi, "map"))
+    return Kodelister(poster)
+
+
+def _raekke(**felter: Any) -> dict[str, Any]:
+    return {"kilde_noegle": "K", "sag_noegle": "S", "indholdstype_go": "Psykolog",
+            "ydelse_go": None, "bevillingstype_go": None,
+            "periode_start": datetime(2023, 2, 1), **felter}
+
+
+def test_tripellet_slaas_op_paa_mappetypen_ikke_ydelsen():
+    loader = _loader(kodelister=_kodelister(Psykolog="4"))
+    indsats = loader.byg(_raekke(ydelse_go="ABA-supervisor", bevillingstype_go="Kat. 1"))
+    assert (indsats.paragraf, indsats.foranstaltning, indsats.tilbud) == ("4", "4", "4")
+
+
+def test_ukendt_mappetype_afvises():
+    loader = _loader(kodelister=_kodelister(Psykolog="4"))
+    with pytest.raises(ManglerMapping):
+        loader.byg(_raekke(indholdstype_go="Ukendt type"))
+
+
+def test_tom_fra_dato_bliver_1900():
+    loader = _loader(kodelister=_kodelister(Psykolog="4"))
+    indsats = loader.byg(_raekke(periode_start=None))
+    assert indsats.periode_start == FIKTIV_STARTDATO == datetime(1900, 1, 1)
+    assert loader.payload(indsats)["periodeStart"].startswith("1900-01-01")
+
+
+def test_type_der_ikke_konverteres_springes_over():
+    loader = _loader(kodelister=_kodelister(Konsulent=None))
+    with pytest.raises(UdeladtMedVilje):
+        loader.byg(_raekke(indholdstype_go="Konsulent"))
+
+
+def test_udeladt_taeller_som_sprunget_over_ikke_afvist():
+    """Der er intet at rette, så det må ikke stå i afvisningsrapporten — og
+    intet skrives i id_map, så en ændret mapning slår igennem næste gang."""
+    from konvertering.loaders.base import Resultat
+
+    skrevet: list[str] = []
+    idmap = SimpleNamespace(**{n: (lambda *a, n=n, **k: skrevet.append(n))
+                               for n in ("reserver", "markér_fejlet", "markér_sprunget_over")})
+    loader = _loader(kodelister=_kodelister(Konsulent=None), idmap=idmap)
+    r = Resultat()
+    loader._behandl_en(_raekke(indholdstype_go="Konsulent"), r)
+    assert (r.sprunget_over, r.afvist) == (1, 0)
+    assert skrevet == []
 
 
 # --- registrering ----------------------------------------------------

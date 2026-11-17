@@ -154,6 +154,12 @@ class ManglerMapping(ValideringsFejl):
         self.liste = liste
 
 
+class UdeladtMedVilje(KonverteringsFejl):
+    """Objektet skal bevidst ikke konverteres (en mapning med handling =
+    ignorer). Ikke en fejl: det markeres 'skipped' og tælles som sprunget
+    over — ikke afvist, for der er intet at rette."""
+
+
 class FilFejl(KonverteringsFejl):
     def __init__(self, besked: str, *, regel: str = "fil_fejl", sti: str | None = None) -> None:
         super().__init__(besked)

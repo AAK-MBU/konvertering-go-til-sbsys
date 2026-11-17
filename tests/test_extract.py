@@ -28,10 +28,12 @@ def _kode() -> str:
 
 def test_fra_og_til_konverteres_med_dansk_datoformat():
     # (?:[^()]|\(\d+\)) tillader DATETIME2(3) inde i kaldet. Uden det så
-    # testen kun tre af de fem konverteringer og overså periodekolonnerne.
+    # testen kun nogle af konverteringerne og overså periodekolonnerne.
+    # To er periode_start og periode_slut. (Den gamle indsatsnøgle havde
+    # tre mere; fingeraftrykket 17-11-2026 bruger teksten som den står.)
     konverteringer = re.findall(
         r"TRY_CONVERT\((?:[^()]|\(\d+\))*?\[(?:Fra|Til)\](?:[^()]|\(\d+\))*?\)", _kode())
-    assert len(konverteringer) >= 5, (
+    assert len(konverteringer) >= 2, (
         f"fandt kun {len(konverteringer)} konverteringer af Fra/Til — er mønsteret ændret?")
     uden_stil = [k for k in konverteringer if not re.search(r",\s*105\s*\)$", k)]
     assert not uden_stil, (
@@ -126,3 +128,42 @@ def test_alle_sql_kommentarer_er_lukkede():
 def test_indlejret_kommentar_fanges():
     assert _kommentar_ubalance("/* se mapping/*.csv */ SELECT 1;")
     assert not _kommentar_ubalance("/* se mapping\\*.csv */ SELECT '/*';")
+
+
+# --- indsatsnøglen ---------------------------------------------------------
+#
+# Testdumpet 17-11-2026: 63 rækker delte den gamle nøgle (sag + type + ydelse
+# + fra) med en anden og blev udeladt. 16 var ens i ALLE felter.
+
+def test_indsatsnoeglen_er_fingeraftryk_af_hele_raekken():
+    kode = _kode()
+    assert "HASHBYTES('SHA2_256'" in kode
+    assert "ROW_NUMBER() OVER" in kode and "PARTITION BY k.[SagsId], k.fingeraftryk" in kode
+    # Kolonner der adskiller rækker, som den gamle nøgle ikke så:
+    for kolonne in ("Til", "Visiteret", "Sagsbehandler", "Timer", "ABAGruppe"):
+        assert f"COALESCE(N'1' + f.[{kolonne}], N'0')" in kode, kolonne
+
+
+def test_indsatsnoeglen_bruger_ikke_concat_ws():
+    """CONCAT_WS kræver SQL Server 2017; versionen kendes ikke."""
+    assert "CONCAT_WS" not in _kode()
+
+
+def test_kolliderende_indsatser_udelades_ikke_laengere():
+    """Den gamle extract tog kun nøgler med COUNT(*) = 1 og smed resten."""
+    assert "HAVING COUNT(*) = 1" not in _kode()
+
+
+def test_tripellet_slaas_op_paa_mappetypen():
+    kode = _kode()
+    for liste in ("paragraf", "foranstaltning", "tilbud"):
+        assert re.search(rf"'{liste}',\s+indholdstype_go\s+FROM stg\.indsats", kode), liste
+
+
+def test_noegletjekket_bruger_samme_udtryk_som_extract():
+    """sql/106 er en kopi af nøgleudtrykket. Glider de fra hinanden, tester
+    tjekket noget andet end det extract gør."""
+    def blok(tekst: str) -> str:
+        return tekst[tekst.index(";WITH kandidater AS ("):tekst.index("nummereret AS (")]
+    tjek = (EXTRACT.parent / "106_indsats_noegle_tjek.sql").read_text(encoding="utf-8")
+    assert blok(tjek) == blok(EXTRACT.read_text(encoding="utf-8"))

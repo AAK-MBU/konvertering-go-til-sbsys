@@ -57,11 +57,12 @@ KILDER: dict[str, Kilde] = {
     "dokumentkategori": Kilde((("stg.dokument", "kategori_go"),)),
     "notattype": Kilde((("stg.notat", "notat_type_go"),)),
     # Indsatser: ét katalog, tre lister. Samme kald, forskellige felter.
-    "paragraf": Kilde((("stg.indsats", "bevillingstype_go"),), "hent_katalog",
+    # Alle tre slås op på mappetypen — tilbuddet ER typen (17-11-2026).
+    "paragraf": Kilde((("stg.indsats", "indholdstype_go"),), "hent_katalog",
                       id_felt="paragrafId", navn_felt="paragraf", bu=True),
-    "foranstaltning": Kilde((("stg.indsats", "ydelse_go"),), "hent_katalog",
+    "foranstaltning": Kilde((("stg.indsats", "indholdstype_go"),), "hent_katalog",
                             id_felt="foranstaltningId", navn_felt="foranstaltning", bu=True),
-    "tilbud": Kilde((("stg.indsats", "ydelse_go"),), "hent_katalog",
+    "tilbud": Kilde((("stg.indsats", "indholdstype_go"),), "hent_katalog",
                     id_felt="tilbudId", navn_felt="tilbud", bu=True),
     "udslagsgivende_forhold": Kilde((("stg.indsats", "udslagsgivende_go"),),
                                     "hent_udslagsgivende", bu=True),

@@ -88,6 +88,19 @@ class Kodelister:
             return None
         return post.sbsys_vaerdi
 
+    def er_udeladt(self, liste: str, go_vaerdi: str | None) -> bool:
+        """Er værdien mappet med ``handling = ignorer``?
+
+        Til objekter der bevidst ikke skal konverteres — fx foranstaltnings-
+        typer hvor konverteringsarket siger "data skal IKKE konverteres".
+        Det er en beslutning, ikke en fejl, og objektet skal springes over
+        frem for at havne i afvisningsrapporten.
+        """
+        if go_vaerdi is None:
+            return False
+        post = self._poster.get((liste, str(go_vaerdi)))
+        return post is not None and post.handling == "ignorer"
+
     def __len__(self) -> int:
         return len(self._poster)
 
