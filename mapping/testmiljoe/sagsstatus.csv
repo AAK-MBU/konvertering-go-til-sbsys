@@ -1,0 +1,5 @@
+liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+sagsstatus;Active;;6;Åben;map;TESTMILJØ: Falske testdata (sql/999_testdata.sql). Id/navn fra testmiljøet 16-18/11-2026;;
+sagsstatus;Closed;;3;Lukket;map;TESTMILJØ: Falske testdata (sql/999_testdata.sql). Kræver kommentar. Id/navn fra testmiljøet 16-18/11-2026;;
+sagsstatus;Åben;;6;Åben;map;TESTMILJØ: Falsk GOStaging (sql/998_gofake_kilde.sql). Id/navn fra testmiljøet 16-18/11-2026;;
+sagsstatus;Lukket;;3;Lukket;map;TESTMILJØ: Falsk GOStaging (sql/998_gofake_kilde.sql). Testmiljøet har ingen Passiv. Id/navn fra testmiljøet 16-18/11-2026;;

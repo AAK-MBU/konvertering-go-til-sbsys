@@ -50,6 +50,24 @@ hvem der sagde god for en mapning, er det dér det skal skrives.
 En række med `handling = map` og tom `sbsys_vaerdi` tæller som uafklaret og
 kommer med i `konv mapping mangler`.
 
+## Produktion og testmiljø
+
+Filerne her i mappen er **produktionens** værdier. Testmiljøet har andre
+id'er og til dels andre feltnavne (fx "ABA gruppe1" for "ABA gruppe"), og
+dets afvigelser ligger i `mapping/testmiljoe/` — samme form, samme
+filnavne, kun de rækker der er anderledes.
+
+`konv mapping load` følger `KONV_MILJOE` i `.env`:
+
+| `KONV_MILJOE` | Indlæses |
+|---|---|
+| `test` (standard) | `mapping/*.csv`, og så `mapping/testmiljoe/*.csv` ovenpå |
+| `prod` | Kun `mapping/*.csv`. Testrækker der står tilbage, deaktiveres |
+
+Testrækkerne mærkes `TESTMILJØ:` i kommentaren. En produktionskørsel
+(`konv load` med `KONV_MILJOE=prod`) nægter at starte, hvis der stadig er
+aktive testrækker i `map.kodeliste`.
+
 ## Listerne
 
 | Fil | Oversætter | Blokerende | Hvor kommer SBSYS-værdien fra |

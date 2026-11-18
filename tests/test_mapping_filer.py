@@ -98,3 +98,27 @@ def test_hver_raekke_har_lige_mange_felter(sti: Path):
     assert not forkerte, (
         f"{sti.name}: linje {forkerte[:5]} har ikke {len(KOLONNER)} felter — "
         f"står der et semikolon i en tekst?")
+
+
+# --- testmiljøets afvigelser (mapping/testmiljoe/) -----------------------
+
+TESTFILER = sorted((MAPPE / "testmiljoe").glob("*.csv"))
+
+
+@pytest.mark.parametrize("sti", TESTFILER, ids=lambda p: p.stem)
+def test_testfilerne_har_samme_form(sti: Path):
+    with sti.open(encoding="utf-8-sig", newline="") as f:
+        raekker = list(csv.reader(f, delimiter=";"))
+    assert raekker[0] == KOLONNER
+    assert all(len(r) == len(KOLONNER) for r in raekker if r)
+    assert all(r[0] == sti.stem for r in raekker[1:] if r)
+
+
+@pytest.mark.parametrize("sti", TESTFILER, ids=lambda p: p.stem)
+def test_testfilerne_overstyrer_kun_eksisterende_lister(sti: Path):
+    """En testfil til en liste produktionen ikke har, er en stavefejl."""
+    assert (MAPPE / sti.name).exists(), f"mapping/{sti.name} findes ikke"
+
+
+def test_der_er_testfiler():
+    assert TESTFILER, "mapping/testmiljoe/ er tom eller væk"

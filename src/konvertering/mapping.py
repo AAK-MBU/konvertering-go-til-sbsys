@@ -112,12 +112,57 @@ class Kodelister:
         return len(self._poster)
 
 
-def indlaes_csv(db: Database, mappe: Path) -> int:
+# Testmiljøets egne id'er og feltnavne ligger i mapping/testmiljoe/ og
+# mærkes med dette i kommentaren, så de kan genkendes i map.kodeliste.
+TESTMAPPE = "testmiljoe"
+TESTMAERKE = "TESTMILJØ"
+
+
+def indlaes_mapping(db: Database, mappe: Path, miljoe: str) -> int:
+    """Indlæs kodelisterne til det miljø kørslen er sat op til (KONV_MILJOE).
+
+    * ``mapping/*.csv`` er PRODUKTIONENS værdier og indlæses altid.
+    * ``mapping/testmiljoe/*.csv`` er testmiljøets afvigelser — andre id'er og
+      feltnavne (fx "ABA gruppe1" for "ABA gruppe"). De lægges OVENPÅ, men kun
+      når miljøet er test.
+    * I produktion deaktiveres testrækker der står tilbage (gyldig = 0), så
+      ingen test-id kan slippe med i en produktionskørsel.
+
+    Før 18-11-2026 lå testværdierne i SQL-filer man skulle huske at køre
+    efter `mapping load` — og huske IKKE at køre før en produktionskørsel.
+    """
+    antal = indlaes_csv(db, mappe)
+    testmappe = mappe / TESTMAPPE
+    if miljoe == "test":
+        if testmappe.is_dir():
+            antal += indlaes_csv(db, testmappe, kommentar_praefiks=TESTMAERKE)
+        return antal
+    slaaet_fra = db.udfoer(
+        "UPDATE map.kodeliste SET gyldig = 0 WHERE gyldig = 1 AND kommentar LIKE ?",
+        f"{TESTMAERKE}%",
+    )
+    if slaaet_fra:
+        log.warning("%d testmiljø-rækker deaktiveret (miljø: %s)", slaaet_fra, miljoe)
+    return antal
+
+
+def aktive_testvaerdier(db: Database) -> int:
+    """Antal aktive kodelisterækker der kommer fra testmiljøet."""
+    raekke = db.hent_en(
+        "SELECT COUNT(*) AS antal FROM map.kodeliste WHERE gyldig = 1 AND kommentar LIKE ?",
+        f"{TESTMAERKE}%",
+    )
+    return int((raekke or {}).get("antal") or 0)
+
+
+def indlaes_csv(db: Database, mappe: Path, *, kommentar_praefiks: str | None = None) -> int:
     """Indlæs alle CSV-filer i mappen til map.kodeliste.
 
     Filnavnet er listenavnet: mapping/kle.csv -> liste='kle'.
     Eksisterende rækker opdateres, nye tilføjes; ingen slettes automatisk —
     en mapping der forsvinder fra CSV'en skal fjernes bevidst.
+
+    ``kommentar_praefiks`` sættes foran hver kommentar (testmiljøets mærke).
     """
     i_alt = 0
     for fil in sorted(mappe.glob("*.csv")):
@@ -133,7 +178,7 @@ def indlaes_csv(db: Database, mappe: Path) -> int:
                         (raekke.get("sbsys_vaerdi") or "").strip() or None,
                         (raekke.get("sbsys_tekst") or "").strip() or None,
                         (raekke.get("handling") or "map").strip(),
-                        (raekke.get("kommentar") or "").strip() or None,
+                        _kommentar(raekke.get("kommentar"), kommentar_praefiks),
                         (raekke.get("godkendt_af") or "").strip() or None,
                         (raekke.get("godkendt_dato") or "").strip() or None,
                     )
@@ -149,7 +194,8 @@ def indlaes_csv(db: Database, mappe: Path) -> int:
               ON t.liste = s.liste AND t.go_vaerdi = s.go_vaerdi
             WHEN MATCHED THEN UPDATE SET
                 go_tekst = ?, sbsys_vaerdi = ?, sbsys_tekst = ?,
-                handling = ?, kommentar = ?, godkendt_af = ?, godkendt_dato = ?
+                handling = ?, kommentar = ?, godkendt_af = ?, godkendt_dato = ?,
+                gyldig = 1
             WHEN NOT MATCHED THEN INSERT
                 (liste, go_vaerdi, go_tekst, sbsys_vaerdi, sbsys_tekst,
                  handling, kommentar, godkendt_af, godkendt_dato)
@@ -169,6 +215,13 @@ def indlaes_csv(db: Database, mappe: Path) -> int:
         log.info("Indlæste %d rækker fra %s (%d skrevet)", len(raekker), fil.name, beroert)
         i_alt += beroert
     return i_alt
+
+
+def _kommentar(tekst: str | None, praefiks: str | None) -> str | None:
+    tekst = (tekst or "").strip()
+    if not praefiks:
+        return tekst or None
+    return tekst if tekst.startswith(praefiks) else f"{praefiks}: {tekst}".rstrip(": ")
 
 
 def skriv_mappe(db: Database, mappe: Path) -> dict[str, int]:

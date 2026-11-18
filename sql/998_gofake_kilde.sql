@@ -6,10 +6,13 @@
   typer kopieres med SELECT TOP (0) * INTO), men indholdet er opdigtet.
   Saa koeres den RIGTIGE extract mod dem:
 
-      uv run konv mapping load
       uv run konv db koer sql\998_gofake_kilde.sql --var cpr1=<CPR der findes i testmiljoeet>
       uv run konv db koer sql\100_extract_skabelon.sql --kilde SBSYS_KONV.gofake
-      uv run konv db koer sql\998_gofake_testmiljoe.sql --var behandler=20 --var skabelon_aba=<id>
+      uv run konv mapping load
+
+  `mapping load` EFTER extract: extract laegger nye GO-vaerdier i kodelisten
+  med tom SBSYS-vaerdi, og mapping load udfylder dem. Med KONV_MILJOE=test
+  laegges testmiljoeets id'er og feltnavne fra mapping\testmiljoe\ ovenpaa.
 
   Hele kaeden — extract, noegler, mapning, loaders — koerer som med det
   rigtige dump, men der kommer ingen rigtige data i naerheden af SBSYS'

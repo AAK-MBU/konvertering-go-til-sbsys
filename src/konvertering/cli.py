@@ -50,7 +50,7 @@ from .files import FilOpslag
 from .hashing import kort_noegle
 from .idmap import IdMap, afslut_run, opret_run, tidligere_maal
 from .loaders import LOADERS, boelge_filter
-from .mapping import indlaes_csv, skriv_mangler_csv, skriv_mappe
+from .mapping import aktive_testvaerdier, indlaes_mapping, skriv_mangler_csv, skriv_mappe
 from .models import Objekttype
 from .sbsys.errors import (
     AutentifikationsFejl,
@@ -575,8 +575,8 @@ def _udfoer(args, settings: Settings) -> int:
 
         db = Database(settings.db)
         if args.mapping_kommando == "load":
-            antal = indlaes_csv(db, MAPPING_MAPPE)
-            log.info("Indlæste %d mapping-rækker", antal)
+            antal = indlaes_mapping(db, MAPPING_MAPPE, settings.miljoe)
+            log.info("Indlæste %d mapping-rækker (miljø: %s)", antal, settings.miljoe)
             return 0
         if args.mapping_kommando == "gem":
             talt = skriv_mappe(db, args.ud)
@@ -921,6 +921,12 @@ def _load(settings: Settings, args) -> int:
         log.info("Bølge %s: %d %s-objekter til indlæsning", valgt, antal, args.objekt_type)
 
     _kontroller_maal(db, settings, args.objekt_type, valgt)
+
+    # Testmiljøets id'er og feltnavne må aldrig følge med ind i produktion.
+    if settings.er_produktion and (antal_test := aktive_testvaerdier(db)):
+        log.error("%d aktive kodelisterækker kommer fra testmiljøet. Kør "
+                  "`konv mapping load` med KONV_MILJOE=prod først.", antal_test)
+        return 2
 
     run_id = opret_run(
         db, fase="load", miljoe=settings.miljoe, dry_run=settings.dry_run,

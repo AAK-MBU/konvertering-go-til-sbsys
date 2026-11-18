@@ -88,7 +88,7 @@ def test_journalark_og_workflows_bruger_ikke_scpfolder():
 # T-SQL tillader INDLEJREDE blokkommentarer: et "/*" inde i en kommentar
 # åbner en ny. Skriver man "mapping/*.csv" i en kommentar, er filen ét langt,
 # uafsluttet kommentarfelt — "Missing end comment mark '*/'" (16-11-2026,
-# sql/999_testdata_testmiljoe.sql). Python ser intet forkert ved det.
+# en SQL-fil til testmiljøets id'er, nu mapping/testmiljoe/). Python ser intet forkert ved det.
 
 def _kommentar_ubalance(tekst: str) -> str | None:
     """None hvis balanceret. Strenge og --linjer tæller ikke med."""
