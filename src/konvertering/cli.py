@@ -205,6 +205,31 @@ def erstat_variabler(sql: str, tildelinger: list[str]) -> tuple[str, list[str]]:
     return _VARIABEL.sub(erstat, sql), sorted(set(mangler))
 
 
+GO_KILDE = "GOStaging.dbo"
+_SKEMANAVN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?")
+
+
+def skift_kilde(sql: str, kilde: str) -> str:
+    """Peg extract på en anden kilde end ``GOStaging.dbo``.
+
+    Til simulering: tabeller med præcis GOStaging's form, men falske data
+    (sql/998_gofake_kilde.sql). Selve extract-filen ændres ikke, så den
+    stadig kan køres i SSMS mod det rigtige dump.
+
+    Kun ``GOStaging.dbo.`` foran et tabelnavn erstattes. Navnet valideres:
+    det sættes ind i SQL, og et skemanavn kan ikke være en parameter.
+    """
+    if not _SKEMANAVN.fullmatch(kilde):
+        raise KonfigurationsFejl(
+            f"--kilde skal være SKEMA eller DATABASE.SKEMA, ikke '{kilde}'")
+    if kilde.lower() == GO_KILDE.lower():
+        return sql
+    antal = sql.count(f"{GO_KILDE}.")
+    if not antal:
+        raise KonfigurationsFejl(f"Scriptet læser ikke fra {GO_KILDE} — --kilde giver ingen mening her")
+    return sql.replace(f"{GO_KILDE}.", f"{kilde}.")
+
+
 def _sniff_kodning(sti: Path) -> str:
     """Gæt filens tegnkodning ud fra dens BOM.
 
@@ -323,6 +348,9 @@ def _parser() -> argparse.ArgumentParser:
     d_koer.add_argument("fil", type=Path)
     d_koer.add_argument("--var", action="append", default=[], metavar="NAVN=VÆRDI",
                         help="Erstat $(NAVN) i scriptet. Kan gentages")
+    d_koer.add_argument("--kilde", default=None, metavar="SKEMA",
+                        help="Læs fra en anden kilde end GOStaging.dbo, fx "
+                             "SBSYS_KONV.gofake (falske data med GOStaging's form)")
     d_koer.add_argument("--raekker", type=int, default=40,
                         help="Højst så mange rækker pr. resultatsæt. 0 = alle")
     d_nul = db.add_parser(
@@ -519,6 +547,9 @@ def _udfoer(args, settings: Settings) -> int:
                 log.error("Filen findes ikke: %s", args.fil)
                 return 2
             sql, mangler = erstat_variabler(args.fil.read_text(encoding="utf-8"), args.var)
+            if args.kilde:
+                sql = skift_kilde(sql, args.kilde)
+                log.info("Kilden er %s i stedet for %s", args.kilde, GO_KILDE)
             if mangler:
                 log.warning("Uerstattede variabler i scriptet: %s", ", ".join(mangler))
             log.info("Kører %s", args.fil.name)
