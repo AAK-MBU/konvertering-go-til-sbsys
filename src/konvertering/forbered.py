@@ -38,6 +38,13 @@ class Kilde:
     faste: tuple[str, ...] = ()             # når listen er en enum i koden
 
 
+# Lister med sammensatte nøgler, der vedligeholdes i hånden ud fra
+# konverteringsarket og derfor ikke kan forberedes fra én stg-kolonne:
+#   tilbudsfelt        <mappetype>|<GO-kolonne> -> SBSYS-feltnavn
+#   tilbudsfeltvaerdi  <GO-kolonne>|<GO-værdi>  -> SBSYS-valgmulighed
+# Se src/konvertering/tilbudsfelter.py.
+HAANDHOLDTE = frozenset({"tilbudsfelt", "tilbudsfeltvaerdi"})
+
 # GO's kolonnenavne ender på _go; det er bevidst, så man kan se hvilken
 # side af mapningen man står på, når man læser en SELECT.
 KILDER: dict[str, Kilde] = {

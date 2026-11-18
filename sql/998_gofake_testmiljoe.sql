@@ -40,7 +40,11 @@ USING (VALUES
     ('tilbud',         N'ABA',      N'$(tilbud_aba|3)',                 N'ABA'),
     ('paragraf',       N'Psykolog', N'$(paragraf|4)',                   N'.'),
     ('foranstaltning', N'Psykolog', N'$(foranstaltning|4)',             N'PPR'),
-    ('tilbud',         N'Psykolog', N'$(tilbud_psykolog|1)',            N'Psykolog')
+    ('tilbud',         N'Psykolog', N'$(tilbud_psykolog|1)',            N'Psykolog'),
+    /* Tilbudsfelter: testmiljøet kalder Psykologs "Indsats"-felt
+       "Indstillingsårsag" (produktion: "Indsats"). Navnet, ikke id'et,
+       er det der mappes — se src/konvertering/tilbudsfelter.py. */
+    ('tilbudsfelt',    N'Psykolog|Indstillingsaarsag', N'Indstillingsårsag', N'Indstillingsårsag')
 ) AS s (liste, go_vaerdi, sbsys_vaerdi, sbsys_tekst)
 ON t.liste = s.liste AND t.go_vaerdi = s.go_vaerdi
 WHEN MATCHED THEN UPDATE SET

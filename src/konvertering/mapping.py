@@ -88,6 +88,13 @@ class Kodelister:
             return None
         return post.sbsys_vaerdi
 
+    def poster_med_praefiks(self, liste: str, praefiks: str) -> dict[str, Opslag]:
+        """Alle poster i listen hvis GO-værdi starter med præfikset —
+        nøglet på resten af værdien. Til sammensatte nøgler som
+        ``<mappetype>|<GO-kolonne>`` i ``tilbudsfelt``."""
+        return {go[len(praefiks):]: post for (lst, go), post in self._poster.items()
+                if lst == liste and go.startswith(praefiks)}
+
     def er_udeladt(self, liste: str, go_vaerdi: str | None) -> bool:
         """Er værdien mappet med ``handling = ignorer``?
 

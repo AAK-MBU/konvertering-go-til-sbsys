@@ -39,13 +39,16 @@ kodelisten med ``handling = ignorer`` og springes over.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
+from ..hashing import maskér
 from ..models import Indsats, Objekttype
 from ..sbsys.errors import PermanentFejl, UdeladtMedVilje, ValideringsFejl
+from ..tilbudsfelter import Advarsel, TilbudsfeltKatalog, byg_feltvaerdier
 from .base import Loader, boelge_filter
 
 log = logging.getLogger(__name__)
@@ -62,6 +65,15 @@ FIKTIV_STARTDATO = datetime(1900, 1, 1)
 class IndsatsLoader(Loader[Indsats]):
     arbejdsliste = "stg.v_indsatser_til_indlaesning"
     objekt_type = Objekttype.INDSATS
+
+    def __init__(self, kontekst: Any) -> None:
+        super().__init__(kontekst)
+        # Hentes første gang der skal bruges tilbudsfelter, og deles af
+        # alle indsatser i kørslen.
+        self._katalog: TilbudsfeltKatalog | None = None
+        # Advarsler fra payload() — skrives i konv.afvist når indsatsen er
+        # oprettet. Ikke før: en dry-run skal ikke fylde rapporten op.
+        self._advarsler: dict[str, list[Advarsel]] = {}
 
     def hent_arbejde(self, graense: int | None = None) -> Iterable[dict[str, Any]]:
         filter_sql, params = boelge_filter(self.k.boelge)
@@ -95,6 +107,8 @@ class IndsatsLoader(Loader[Indsats]):
             udslagsgivende_forhold=m.slaa_op(
                 "udslagsgivende_forhold", raekke.get("udslagsgivende_go"), paakraevet=False
             ),
+            mappetype=typen,
+            go_felter=_go_felter(raekke.get("raa_json")),
         )
 
     def payload(self, objekt: Indsats) -> dict[str, Any]:
@@ -126,7 +140,31 @@ class IndsatsLoader(Loader[Indsats]):
             krop["udslagsgivendeForholdIds"] = [int(objekt.udslagsgivende_forhold)]
         # Ingen antalVederlag, tillaegsPrisPerEnhed, engangsTillaeg eller
         # antalDoegn: økonomi er ikke en del af konverteringen.
+
+        feltvaerdier = self._tilbudsfelter(objekt)
+        if feltvaerdier:
+            krop["feltVaerdier"] = feltvaerdier
         return krop
+
+    def _tilbudsfelter(self, objekt: Indsats) -> list[dict[str, Any]]:
+        """feltVaerdier til oprettelsen — se tilbudsfelter.py.
+
+        Kræver Børn og Unge-API'et (felterne slås op dér). Uden det sendes
+        ingen tilbudsfelter; send() afviser alligevel indsatsen med en
+        forklaring.
+        """
+        if self.k.bu_klient is None or not objekt.mappetype or not objekt.go_felter:
+            return []
+        if self._katalog is None:
+            self._katalog = TilbudsfeltKatalog(self.k.bu_klient, self.k.endpoints)
+        udfald = byg_feltvaerdier(
+            self._katalog, self.k.kodelister, objekt.mappetype,
+            int(objekt.tilbud), objekt.go_felter)  # type: ignore[arg-type]
+        for a in udfald.advarsler:
+            log.warning("indsats %s: %s udeladt — %s",
+                        objekt.kilde_noegle[:12], a.kolonne, a.besked)
+        self._advarsler[objekt.kilde_noegle] = udfald.advarsler
+        return udfald.felt_vaerdier
 
     def send(self, objekt: Indsats, payload: dict[str, Any]) -> tuple[str, str | None]:
         if self.k.bu_klient is None:
@@ -167,6 +205,15 @@ class IndsatsLoader(Loader[Indsats]):
             raise PermanentFejl(
                 "Børn og Unge-API'et returnerede intet foranstaltningSagId",
                 korrelations_id=svar.korrelations_id,
+            )
+        # Udeladte tilbudsfelter i rapporten — så PPR kan se hvad der skal
+        # udfyldes i hånden, når felterne igen bliver obligatoriske.
+        for a in self._advarsler.pop(objekt.kilde_noegle, []):
+            self._afvis(
+                objekt.kilde_noegle, "tilbudsfelt_udeladt", "advarsel",
+                f"Indsatsen er oprettet (id={indsats_id}), men {a.kolonne} blev "
+                f"ikke overført: {a.besked}",
+                felt=a.kolonne, vaerdi=a.vaerdi,
             )
         return str(indsats_id), None
 
@@ -227,6 +274,19 @@ class IndsatsLoader(Loader[Indsats]):
             f"Sagen har {len(ukendte)} ens indsatser i SBSYS, som konverteringen "
             f"ikke selv har registreret. Kan ikke afgøre om én af dem er denne."
         )
+
+
+def _go_felter(raa_json: Any) -> dict[str, Any]:
+    """Foranstaltningsdata-rækkens kolonner fra raa_json. Tom ved fejl —
+    så sendes indsatsen uden tilbudsfelter frem for slet ikke."""
+    if not raa_json:
+        return {}
+    try:
+        data = json.loads(raa_json) if isinstance(raa_json, str) else raa_json
+    except ValueError:
+        log.warning("raa_json kunne ikke læses: %s", maskér(str(raa_json))[:80])
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _dato(r: dict[str, Any], *navne: str) -> str | None:

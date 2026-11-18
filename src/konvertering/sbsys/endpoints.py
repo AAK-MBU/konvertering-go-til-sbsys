@@ -96,9 +96,15 @@ STANDARD_OPERATIONER: dict[str, Operation] = {
     # svarer altsaa med noget helt andet end det man tror.
     "hent_sag_indsatser": Operation(                                                   # [v]
         "GET", "/bu_api/sag/{sag_id}/sag_foranstaltninger", (200, 204, 404)),
-    # Tilbudsfelter: et tilbud kan have egne felter, og vaerdierne saettes
-    # i et SELVSTAENDIGT kald EFTER indsatsen findes. Se A19.
+    # Tilbudsfelter: et tilbud har sine egne felter. Vaerdierne sendes I
+    # OPRETTELSEN som feltVaerdier (testmiljoeet 18-11-2026) — et
+    # obligatorisk felt kan ikke udfyldes bagefter. Se tilbudsfelter.py.
     "hent_tilbudfelter": Operation("GET", "/bu_api/tilbud/{tilbud_id}/tilbudfelt", (200,)),    # [v]
+    "hent_tilbudfelttyper": Operation("GET", "/bu_api/tilbudfelttype", (200,)),                # [v]
+    "hent_vaerdilistemuligheder": Operation(
+        "GET", "/bu_api/tilbudfeltvaerdiliste/{liste_id}/tilbudfeltvaerdilistemulighed", (200,)),  # [v]
+    "hent_eksterne_muligheder": Operation(
+        "GET", "/bu_api/externalreference/tilbudfeltvaerdilistemulighed", (200,)),         # [v]
     "opret_tilbudfeltvaerdi": Operation(
         "POST", "/bu_api/sag_foranstaltning/{indsats_id}/tilbudfeltvaerdi", (200, 201)),       # [v]
     # Livstegn paa BU-vaerten. Bemaerk /api/, ikke /bu_api/.

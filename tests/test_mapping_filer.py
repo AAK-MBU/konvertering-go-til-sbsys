@@ -28,7 +28,9 @@ def _lister_i_koden() -> set[str]:
     """Navnene koden faktisk slår op på. Også når kaldet er delt over
     flere linjer — det er netop dér man glemmer at oprette filen."""
     kilde = "\n".join(p.read_text(encoding="utf-8") for p in Path("src").rglob("*.py"))
-    return set(re.findall(r'slaa_op\(\s*"(\w+)"', kilde))
+    # Også lister der slås op via en konstant: FELT_LISTE = "tilbudsfelt"
+    return (set(re.findall(r'slaa_op\(\s*"(\w+)"', kilde))
+            | set(re.findall(r'^\w*_LISTE\s*=\s*"(\w+)"', kilde, re.MULTILINE)))
 
 
 def _lister_i_sql() -> set[str]:
