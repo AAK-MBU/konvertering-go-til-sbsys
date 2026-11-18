@@ -196,6 +196,19 @@ def _az_ident(v: str) -> str | None:
     return v.strip().casefold() if _AZ_ALENE.fullmatch(v.strip()) else None
 
 
+def eksterne_kandidater(v: str) -> set[str]:
+    """De eksterne nøgler en GO-værdi kan svare til i en DWH-liste.
+
+    Kun AZ-identen for brugere: et eksakt match på den nøgle DWH bruger
+    (Jakob, 18-11-2026). Tallene i GO's institutionsværdier ("Navn [495]")
+    bruges BEVIDST IKKE: det er ikke sikkert at de svarer til listernes
+    nøgler, og et forkert gæt havner lydløst i SBSYS som en gyldig værdi.
+    Institutioner mappes eksplicit i mapping/tilbudsfeltvaerdi.csv.
+    """
+    az = _az_ident(v)
+    return {az} if az else set()
+
+
 # --- selve opbygningen ----------------------------------------------------
 
 def byg_feltvaerdier(
@@ -282,10 +295,12 @@ def _omsaet(katalog, kodelister, kolonne, raa, felt: Felt, advar) -> dict[str, A
         traef = [m for m in muligheder
                  if str(m.get("vaerdiMulighed") or "").strip().casefold() == tekst]
         if not traef:
-            # DWH-lister: match på ekstern nøgle (AZ-ident for brugere)
-            noegle = _az_ident(raa) or tekst
-            eksterne = katalog.eksterne_noegler()
-            traef = [m for m in muligheder if eksterne.get(int(m.get("id", -1))) == noegle]
+            # DWH-brugerlisten: match på ekstern nøgle (AZ-ident).
+            kandidater = eksterne_kandidater(raa)
+            if kandidater:
+                eksterne = katalog.eksterne_noegler()
+                traef = [m for m in muligheder
+                         if eksterne.get(int(m.get("id", -1))) in kandidater]
         if not traef:
             advar(f"'{felt.navn}' har ingen valgmulighed der svarer til GO-værdien")
             return None

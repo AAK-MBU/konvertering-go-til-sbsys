@@ -15,7 +15,13 @@ import pytest
 
 from konvertering.mapping import Kodelister, Opslag
 from konvertering.sbsys.endpoints import Endpoints
-from konvertering.tilbudsfelter import TilbudsfeltKatalog, byg_feltvaerdier, dato, timer
+from konvertering.tilbudsfelter import (
+    TilbudsfeltKatalog,
+    byg_feltvaerdier,
+    dato,
+    eksterne_kandidater,
+    timer,
+)
 
 TYPER = [
     {"id": 1, "navn": "Visiteret", "aktiv": True, "vaerdiType": "Datetime"},
@@ -194,3 +200,17 @@ def test_indsatsens_payload_faar_feltvaerdier_fra_raa_json():
     assert krop["feltVaerdier"] == [{"tilbudFeltId": 3, "vaerdi": "2024-05-20T00:00:00"}]
     # Advarslen gemmes til send(), der skriver den i konv.afvist efter oprettelsen
     assert [a.kolonne for a in loader._advarsler["K"]] == ["Indstillingsaarsag"]
+
+
+# --- ingen gæt på institutionsnumre --------------------------------------
+
+@pytest.mark.parametrize("go", ["Dagplejen Harlev [495]", "158 Møllevang dagtilbud",
+                                "Harlev Dagtilbud"])
+def test_institutionsnumre_bruges_ikke_som_noegle(go):
+    """Bevidst fravalgt 18-11-2026: tallet er ikke sikkert listens nøgle,
+    og et forkert match ville lande lydløst i SBSYS."""
+    assert not eksterne_kandidater(go)
+
+
+def test_az_ident_er_eneste_eksterne_noegle():
+    assert eksterne_kandidater("Fornavn Efternavn (AZ12345)") == {"az12345"}
