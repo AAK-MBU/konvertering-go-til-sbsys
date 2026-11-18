@@ -167,3 +167,21 @@ def test_noegletjekket_bruger_samme_udtryk_som_extract():
         return tekst[tekst.index(";WITH kandidater AS ("):tekst.index("nummereret AS (")]
     tjek = (EXTRACT.parent / "106_indsats_noegle_tjek.sql").read_text(encoding="utf-8")
     assert blok(tjek) == blok(EXTRACT.read_text(encoding="utf-8"))
+
+
+# --- sorteringsregler (collation) -----------------------------------------
+#
+# GOStaging og SBSYS_KONV har forskellige collations. En sammenligning
+# mellem en GOStaging-kolonne og en stg-kolonne giver Msg 468 uden
+# COLLATE. Fundet 18-11-2026 ved simulering mod sql/998_gofake_kilde.sql.
+
+def test_gostaging_mod_stg_sammenligninger_har_collate():
+    kode = _kode()
+    # Alle opslag i stg der sammenlignes med noget der IKKE er en stg-kolonne
+    # (et alias med [Kolonne] fra GOStaging, eller r.* afledt af GOStaging).
+    sammenligninger = re.findall(
+        r"FROM stg\.\w+ \w+ WHERE \w+\.kilde_noegle = (\w+\.(?:\[\w+\]|\w+))([^)]*)\)", kode)
+    assert len(sammenligninger) >= 9, f"fandt kun {len(sammenligninger)} — er mønsteret ændret?"
+    uden = [f"{venstre}{resten}" for venstre, resten in sammenligninger
+            if "COLLATE DATABASE_DEFAULT" not in resten]
+    assert not uden, f"mangler COLLATE DATABASE_DEFAULT: {uden}"

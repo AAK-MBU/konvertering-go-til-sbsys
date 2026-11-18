@@ -55,6 +55,14 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
+/* SORTERINGSREGLER (collation). GOStaging og SBSYS_KONV har forskellige
+   (den ene Danish_Norwegian_CI_AS, den anden SQL_Danish_Pref_CP1_CI_AS). Hver gang en
+   GOStaging-kolonne sammenlignes med en kolonne i stg, skal der staa
+   COLLATE DATABASE_DEFAULT paa GOStaging-siden — ellers Msg 468 "Cannot
+   resolve the collation conflict". Fundet 18-11-2026 ved simulering mod
+   en falsk GOStaging (sql/998_gofake_kilde.sql), hvis tabeller har
+   GOStaging's sorteringsregler. test_extract holder fast i det. */
+
 /* ================================================================== */
 /* 1) Sager                                                            */
 /* ================================================================== */
@@ -230,8 +238,8 @@ FROM (
     WHERE  COALESCE(NULLIF(LTRIM(RTRIM(k.[CPR])), N''),
                     NULLIF(LTRIM(RTRIM(k.[CVR])), N'')) IS NOT NULL
 ) AS r
-WHERE  EXISTS (SELECT 1 FROM stg.part p WHERE p.kilde_noegle = r.part_noegle)
-  AND  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = r.sag_noegle);
+WHERE  EXISTS (SELECT 1 FROM stg.part p WHERE p.kilde_noegle = r.part_noegle COLLATE DATABASE_DEFAULT)
+  AND  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = r.sag_noegle COLLATE DATABASE_DEFAULT);
 
 /* ================================================================== */
 /* 4) Dokumenter                                                       */
@@ -287,7 +295,7 @@ SELECT
     NULLIF(LTRIM(RTRIM(d.[SHACheckSum])), N''),
     (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
 FROM   GOStaging.dbo.[Documents] AS d
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId]);
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* Checksummer der staar i DocumentSHA frem for paa dokumentet selv. */
 UPDATE d
@@ -355,7 +363,7 @@ SELECT
     NULLIF(LTRIM(RTRIM(n.[SHACheckSum])), N''),
     (SELECT n.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
 FROM   GOStaging.dbo.[JournalNotes] AS n
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId]);
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* ================================================================== */
 /* 5b) Workflows — ogsaa dokumenter                                    */
@@ -390,7 +398,7 @@ SELECT
     NULLIF(LTRIM(RTRIM(w.[SHACheckSum])), N''),
     (SELECT w.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
 FROM   GOStaging.dbo.[GOWorkflows] AS w
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId]);
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* ================================================================== */
 /* 6) Indsatser                                                        */
@@ -509,7 +517,7 @@ SELECT
     COALESCE(n.[HenvisningsAarsag], n.[Aarsag]),
     (SELECT n.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
 FROM   nummereret AS n
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId]);
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* Til orientering: hvor mange aegte dubletter kom med som nr. 2, 3 ... */
 DECLARE @aegte_dubletter INT =
@@ -591,15 +599,15 @@ ORDER  BY COUNT(*) DESC;
 /* Rækker der blev valgt fra, fordi sagen ikke fandtes. */
 SELECT 'Forældreloese' AS afsnit, 'dokument' AS kilde, COUNT(*) AS antal
 FROM   GOStaging.dbo.[Documents] d
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId])
+WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId] COLLATE DATABASE_DEFAULT)
 UNION ALL
 SELECT 'Forældreloese', 'journalnotat', COUNT(*)
 FROM   GOStaging.dbo.[JournalNotes] n
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId])
+WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT)
 UNION ALL
 SELECT 'Forældreloese', 'workflow', COUNT(*)
 FROM   GOStaging.dbo.[GOWorkflows] w
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId]);
+WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* Journalnotater uden en sti: de kan ikke findes paa fileshare. */
 SELECT 'Journalnotat uden sti' AS afsnit, COUNT(*) AS antal
