@@ -44,7 +44,9 @@ USING (VALUES
     /* Tilbudsfelter: testmiljøet kalder Psykologs "Indsats"-felt
        "Indstillingsårsag" (produktion: "Indsats"). Navnet, ikke id'et,
        er det der mappes — se src/konvertering/tilbudsfelter.py. */
-    ('tilbudsfelt',    N'Psykolog|Indstillingsaarsag', N'Indstillingsårsag', N'Indstillingsårsag')
+    ('tilbudsfelt',    N'Psykolog|Indstillingsaarsag', N'Indstillingsårsag', N'Indstillingsårsag'),
+    /* ... og ABA's "ABA gruppe" hedder "ABA gruppe1" i testmiljøet. */
+    ('tilbudsfelt',    N'ABA|ABAGruppe',               N'ABA gruppe1',       N'ABA gruppe1')
 ) AS s (liste, go_vaerdi, sbsys_vaerdi, sbsys_tekst)
 ON t.liste = s.liste AND t.go_vaerdi = s.go_vaerdi
 WHEN MATCHED THEN UPDATE SET

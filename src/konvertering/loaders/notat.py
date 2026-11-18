@@ -28,6 +28,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
+from ..hashing import kort_noegle
 from ..models import Notat, Objekttype
 from ..sbsys.errors import PermanentFejl, ValideringsFejl
 from .base import Loader, boelge_filter
@@ -88,7 +89,7 @@ class NotatLoader(Loader[Notat]):
         sbsys_sag_id = self.k.idmap.sbsys_id(Objekttype.SAG, objekt.sag_noegle)
         if not sbsys_sag_id:
             raise ValideringsFejl(
-                f"Sagen {objekt.sag_noegle[:12]} er ikke indlæst endnu — "
+                f"Sagen {kort_noegle(objekt.sag_noegle)} er ikke indlæst endnu — "
                 f"notatet kan ikke placeres",
                 regel="sag_ikke_indlaest", felt="sag_noegle",
             )

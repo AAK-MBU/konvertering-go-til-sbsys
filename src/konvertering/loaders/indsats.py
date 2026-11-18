@@ -45,7 +45,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from ..hashing import maskér
+from ..hashing import kort_noegle, maskér
 from ..models import Indsats, Objekttype
 from ..sbsys.errors import PermanentFejl, UdeladtMedVilje, ValideringsFejl
 from ..tilbudsfelter import Advarsel, TilbudsfeltKatalog, byg_feltvaerdier
@@ -162,7 +162,7 @@ class IndsatsLoader(Loader[Indsats]):
             int(objekt.tilbud), objekt.go_felter)  # type: ignore[arg-type]
         for a in udfald.advarsler:
             log.warning("indsats %s: %s udeladt — %s",
-                        objekt.kilde_noegle[:12], a.kolonne, a.besked)
+                        kort_noegle(objekt.kilde_noegle), a.kolonne, a.besked)
         self._advarsler[objekt.kilde_noegle] = udfald.advarsler
         return udfald.felt_vaerdier
 
@@ -177,7 +177,7 @@ class IndsatsLoader(Loader[Indsats]):
         sbsys_sag_id = self.k.idmap.sbsys_id(Objekttype.SAG, objekt.sag_noegle)
         if not sbsys_sag_id:
             raise ValideringsFejl(
-                f"Sagen {objekt.sag_noegle[:12]} er ikke indlæst endnu — "
+                f"Sagen {kort_noegle(objekt.sag_noegle)} er ikke indlæst endnu — "
                 f"indsatsen kan ikke placeres",
                 regel="sag_ikke_indlaest", felt="sag_noegle",
             )
@@ -190,7 +190,7 @@ class IndsatsLoader(Loader[Indsats]):
         eksisterende = self._find_identisk(krop)
         if eksisterende:
             log.warning("Indsats %s fandtes allerede i SBSYS (id=%s) — genbruger",
-                        objekt.kilde_noegle[:12], eksisterende)
+                        kort_noegle(objekt.kilde_noegle), eksisterende)
             return eksisterende, None
 
         op = self.k.endpoints.operation("opret_indsats")

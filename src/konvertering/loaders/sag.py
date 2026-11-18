@@ -6,7 +6,7 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
-from ..hashing import maskér
+from ..hashing import kort_noegle, maskér
 from ..models import Objekttype, Sag
 from ..sbsys.errors import (
     CertifikatFejl,
@@ -129,7 +129,7 @@ class SagLoader(Loader[Sag]):
         sbsys_nummer: str | None = None
         if sbsys_id:
             log.warning("Sag %s fandtes allerede i SBSYS (id=%s) — genbruger",
-                        objekt.kilde_noegle[:12], sbsys_id)
+                        kort_noegle(objekt.kilde_noegle), sbsys_id)
         else:
             op = self.k.endpoints.operation("opret_sag")
             svar = self.k.klient.kald(
@@ -179,7 +179,7 @@ class SagLoader(Loader[Sag]):
             raise
         except (PermanentFejl, ForbigaaendeFejl) as e:
             log.warning("Sag %s oprettet (id=%s), men status kunne ikke saettes: %s",
-                        objekt.kilde_noegle[:12], sbsys_id, maskér(str(e)))
+                        kort_noegle(objekt.kilde_noegle), sbsys_id, maskér(str(e)))
             self._afvis(
                 objekt.kilde_noegle, "status_ikke_sat", "advarsel",
                 f"Sagen er oprettet i SBSYS (id={sbsys_id}), men status blev ikke "
@@ -209,7 +209,7 @@ class SagLoader(Loader[Sag]):
         )
         if not raekke:
             raise ValideringsFejl(
-                f"Parten {objekt.primaer_part_noegle[:12]} findes ikke i stg.part",
+                f"Parten {kort_noegle(objekt.primaer_part_noegle)} findes ikke i stg.part",
                 regel="ukendt_part", felt="primaer_part_noegle",
             )
 

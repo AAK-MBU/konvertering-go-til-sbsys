@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..files import FILSTATUS_OK
+from ..hashing import kort_noegle
 from ..models import Dokument, Objekttype, Retning
 from ..sbsys.errors import FilFejl, PermanentFejl
 from .base import Loader, boelge_filter
@@ -101,7 +102,7 @@ class DokumentLoader(Loader[Dokument]):
         sbsys_sag_id = self.k.idmap.sbsys_id(Objekttype.SAG, objekt.sag_noegle)
         if not sbsys_sag_id:
             raise PermanentFejl(
-                f"Sagen {objekt.sag_noegle[:12]} er ikke indlæst endnu — "
+                f"Sagen {kort_noegle(objekt.sag_noegle)} er ikke indlæst endnu — "
                 f"dokumentet kan ikke placeres"
             )
 
