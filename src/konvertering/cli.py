@@ -454,6 +454,8 @@ def _parser() -> argparse.ArgumentParser:
     kald.add_argument("metode", help="GET, OPTIONS, POST ...")
     kald.add_argument("sti", help="Fx /bu_api/sag_foranstaltning")
     kald.add_argument("--base", default=None, help="Anden vært end SBSYS_BASE_URL")
+    kald.add_argument("--bu", action="store_true",
+                      help="Kald Børn og Unge-API'et (værten i SBSYS_BU_BASE_URL)")
     kald.add_argument("--krop", type=Path, default=None, help="JSON-fil som request-body")
     kald.add_argument("--jatak", action="store_true",
                       help="Påkrævet for POST/PUT/PATCH/DELETE — de kan ændre data")
@@ -1244,8 +1246,14 @@ def _kald(settings: Settings, args: argparse.Namespace) -> int:
         krop = json.loads(args.krop.read_text(encoding="utf-8-sig"))
 
     sbsys = replace(settings.sbsys, maks_forsoeg=1)
-    if args.base:
+    if args.bu:
+        if not sbsys.bu_base_url:
+            print("SBSYS_BU_BASE_URL er ikke sat i .env.", file=sys.stderr)
+            return 2
+        sbsys = replace(sbsys, base_url=sbsys.bu_base_url)
+    elif args.base:
         sbsys = replace(sbsys, base_url=args.base.rstrip("/"))
+    log.info("Kalder %s", sbsys.base_url)
     kontekst = byg_kontekst(replace(settings, sbsys=sbsys))
     try:
         svar = kontekst.klient.kald(

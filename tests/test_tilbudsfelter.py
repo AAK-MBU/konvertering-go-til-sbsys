@@ -214,3 +214,29 @@ def test_institutionsnumre_bruges_ikke_som_noegle(go):
 
 def test_az_ident_er_eneste_eksterne_noegle():
     assert eksterne_kandidater("Fornavn Efternavn (AZ12345)") == {"az12345"}
+
+
+# --- SBSYS tjekker ikke at valgmuligheden hører til feltets liste -------
+#
+# Testmiljøet 18-11-2026 (indsats 72): valgmulighed 613 fra Indstillings-
+# årsag-listen i ABA's Institution-felt gav HTTP 200, og feltet stod
+# ødelagt-tomt i brugerfladen. SBSYS beskytter os ikke — koden skal.
+
+def test_valgmuligheden_kommer_altid_fra_feltets_egen_liste():
+    """Selv når teksten findes i en ANDEN liste, må dens id ikke bruges."""
+    MULIGHEDER[202] = [{"id": 700, "vaerdiMulighed": "Møllevang Dagtilbud", "aktiv": True}]
+    TYPER.append({"id": 31, "navn": "Institution", "aktiv": True, "vaerdiType": "Predefined",
+                  "tilbudFeltVaerdiListeId": 202})
+    FELTER[10] = [{"id": 16, "tilbudFeltTypeId": 31, "aktiv": True}]
+    try:
+        # "Indstilling" findes i liste 104 (id 613), men ikke i feltets liste 202
+        u = _byg("ABA", 10, {"SkoleEllerInstitution": "Indstilling"},
+                 **{"ABA|SkoleEllerInstitution": "Institution"})
+        assert u.felt_vaerdier == []
+        u = _byg("ABA", 10, {"SkoleEllerInstitution": "Møllevang Dagtilbud"},
+                 **{"ABA|SkoleEllerInstitution": "Institution"})
+        assert u.felt_vaerdier == [{"tilbudFeltId": 16, "tilbudFeltVaerdiListeMulighedId": 700}]
+    finally:
+        MULIGHEDER.pop(202)
+        TYPER.pop()
+        FELTER.pop(10)

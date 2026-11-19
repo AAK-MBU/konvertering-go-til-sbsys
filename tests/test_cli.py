@@ -380,3 +380,12 @@ def test_udfoer_mange_er_sikker_som_standard():
     from konvertering.db import Database
 
     assert inspect.signature(Database.udfoer_mange).parameters["hurtig"].default is False
+
+
+def test_kald_har_en_bu_genvej():
+    """`konv kald GET /bu_api/... --bu` bruger SBSYS_BU_BASE_URL fra .env,
+    så adressen ikke skal skrives (og kopieres forkert) i hvert kald."""
+    from konvertering.cli import _parser
+
+    args = _parser().parse_args(["kald", "GET", "/bu_api/paragraf", "--bu"])
+    assert args.bu is True
