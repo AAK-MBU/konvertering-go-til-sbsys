@@ -457,6 +457,9 @@ def _parser() -> argparse.ArgumentParser:
     kald.add_argument("--bu", action="store_true",
                       help="Kald Børn og Unge-API'et (værten i SBSYS_BU_BASE_URL)")
     kald.add_argument("--krop", type=Path, default=None, help="JSON-fil som request-body")
+    kald.add_argument("--ud", type=Path, default=None, metavar="FIL",
+                      help="Skriv HELE svaret til en fil (UTF-8). Skærmen viser kun "
+                           "de første 20.000 tegn")
     kald.add_argument("--jatak", action="store_true",
                       help="Påkrævet for POST/PUT/PATCH/DELETE — de kan ændre data")
 
@@ -1272,12 +1275,22 @@ def _kald(settings: Settings, args: argparse.Namespace) -> int:
     legeme = svar.krop
     if isinstance(legeme, bytes):
         legeme = legeme.decode("utf-8", "replace")
-    if isinstance(legeme, (dict, list)):
-        print(json.dumps(legeme, indent=2, ensure_ascii=False)[:20000])
-    elif legeme:
-        print(str(legeme)[:20000])
+    tekst = (json.dumps(legeme, indent=2, ensure_ascii=False)
+             if isinstance(legeme, (dict, list)) else str(legeme or ""))
+
+    # Til en fil: hele svaret, i UTF-8. `> fil` i PowerShell klipper ved
+    # 20.000 tegn og ødelægger æøå (konsollens tegntabel) — 19-11-2026.
+    if args.ud:
+        args.ud.write_text(tekst, encoding="utf-8")
+        antal = f", {len(legeme)} elementer" if isinstance(legeme, list) else ""
+        print(f"Hele svaret ({len(tekst)} tegn{antal}) er skrevet til {args.ud}")
+        return 0
+
+    if len(tekst) > 20000:
+        print(tekst[:20000])
+        print(f"\n... klippet ved 20.000 af {len(tekst)} tegn. Brug --ud FIL for hele svaret.")
     else:
-        print("(tom krop)")
+        print(tekst or "(tom krop)")
     return 0
 
 

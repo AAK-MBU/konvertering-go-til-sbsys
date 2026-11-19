@@ -389,3 +389,11 @@ def test_kald_har_en_bu_genvej():
 
     args = _parser().parse_args(["kald", "GET", "/bu_api/paragraf", "--bu"])
     assert args.bu is True
+
+
+def test_kald_kan_skrive_hele_svaret_til_en_fil():
+    """Skærmen klipper ved 20.000 tegn; en værdiliste er længere."""
+    from konvertering.cli import _parser
+
+    args = _parser().parse_args(["kald", "GET", "/bu_api/x", "--bu", "--ud", "liste.json"])
+    assert str(args.ud) == "liste.json"
