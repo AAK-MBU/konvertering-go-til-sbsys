@@ -1,6 +1,6 @@
 liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
-sagsstatus;Active;Aktiv;1;Aktiv;map;;;
-sagsstatus;Closed;Afsluttet;3;Afsluttet;map;;;
+sagsstatus;Active;Aktiv;1;Åben;map;Kun i de falske testdata (999). Produktionens id 20-11-2026.;;
+sagsstatus;Closed;Afsluttet;7;Passiv;map;Kun i de falske testdata (999). Som Lukket: lukkede -> Passiv. Produktionens id 20-11-2026 (3 er Overlevering afventer i prod).;;
 sagsstatus;Draft;Kladde;;;ignorer;Kladder konverteres ikke;;
-sagsstatus;Åben;Åben;;Åben;map;Vaerdi i testdumpet. Konvertering GO-SBSYS – Til NC.xlsx, ark Konvertering af sager: lukkede sager -> Passiv, aabne -> Åben (noteret for PPR). SagsStatusId hentes fra SBSYS.;;
-sagsstatus;Lukket;Lukket;;Passiv;map;Vaerdi i testdumpet. Konvertering GO-SBSYS – Til NC.xlsx, ark Konvertering af sager: lukkede sager -> Passiv, aabne -> Åben (noteret for PPR). SagsStatusId hentes fra SBSYS.;;
+sagsstatus;Åben;Åben;1;Åben;map;Vaerdi i testdumpet. Konvertering GO-SBSYS – Til NC.xlsx, ark Konvertering af sager: lukkede sager -> Passiv, aabne -> Åben (noteret for PPR). SagsStatusId hentes fra SBSYS.;;
+sagsstatus;Lukket;Lukket;7;Passiv;map;Vaerdi i testdumpet. Konvertering GO-SBSYS – Til NC.xlsx, ark Konvertering af sager: lukkede sager -> Passiv, aabne -> Åben (noteret for PPR). SagsStatusId hentes fra SBSYS.;;
