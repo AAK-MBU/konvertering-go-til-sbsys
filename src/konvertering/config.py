@@ -144,8 +144,15 @@ class DatabaseIndstillinger:
     # ODBC Driver 18 kræver kryptering som standard. På en testserver med et
     # selvsigneret certifikat skal certifikatet derfor accepteres blindt —
     # ellers kan man ikke forbinde. I produktion er det omvendt: dér skal
-    # certifikatet være gyldigt, og Settings.valider() afviser at køre uden.
+    # certifikatet være gyldigt, og Settings.valider() afviser at køre uden —
+    # medmindre det er accepteret bevidst med KONV_DB_TRUST_CERT_PROD=1.
     trust_server_certificate: bool = True
+    # 20-11-2026: konverteringsdatabasens server har et selvsigneret
+    # certifikat, og kommunens øvrige databasescripts stoler blindt på det.
+    # Besluttet at gøre det samme i prod, men kun som et bevidst tilvalg, og
+    # med en advarsel ved hver kørsel. IT kan stadig give serveren et
+    # certifikat fra kommunens CA; så sættes KONV_DB_TRUST_CERT=0.
+    blind_tillid_accepteret_i_prod: bool = False
 
     def __post_init__(self) -> None:
         if not self.trusted_connection and not self.brugernavn:
@@ -280,9 +287,18 @@ class Settings:
                 "serveren der kan verificeres."
             )
         if self.er_produktion and self.db.trust_server_certificate:
-            raise KonfigurationsFejl(
-                "I produktion skal databaseserverens certifikat kunne verificeres. "
-                "Sæt KONV_DB_TRUST_CERT=0 og sørg for et gyldigt certifikat på serveren."
+            if not self.db.blind_tillid_accepteret_i_prod:
+                raise KonfigurationsFejl(
+                    "I produktion verificeres databaseserverens certifikat ikke "
+                    "(KONV_DB_TRUST_CERT=1). Enten: sæt KONV_DB_TRUST_CERT=0, hvis "
+                    "serveren har et certifikat fra kommunens CA. Eller: accepter "
+                    "det bevidst med KONV_DB_TRUST_CERT_PROD=1, som kommunens "
+                    "øvrige databasescripts."
+                )
+            log.warning(
+                "Databaseserverens certifikat verificeres IKKE (bevidst accepteret "
+                "med KONV_DB_TRUST_CERT_PROD=1). Forbindelsen er krypteret, men "
+                "serverens identitet kontrolleres ikke."
             )
         if not self.filer.rod.exists():
             raise KonfigurationsFejl(f"Filrod findes ikke: {self.filer.rod}")
@@ -314,6 +330,7 @@ class Settings:
             brugernavn=None if trusted else _kraev("KONV_DB_BRUGER"),
             kodeord=None if trusted else _kraev("KONV_DB_KODEORD"),
             trust_server_certificate=_flag("KONV_DB_TRUST_CERT", True),
+            blind_tillid_accepteret_i_prod=_flag("KONV_DB_TRUST_CERT_PROD", False),
         )
 
         sbsys = SbsysIndstillinger(
