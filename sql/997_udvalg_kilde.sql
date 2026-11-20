@@ -64,12 +64,14 @@ END
 GO
 
 /* Hvad der blev kopieret. Ingen persondata: kun typer og antal.
-   CAST til NVARCHAR: GOStaging's tekstkolonner er VARCHAR i Windows-1252,
-   og forbindelsen læser VARCHAR som UTF-8 — "Åben" gav UnicodeDecodeError
-   (20-11-2026). stg er NVARCHAR hele vejen og har ikke problemet. */
-SELECT CAST(c.Sagsprofil   AS NVARCHAR(256)) AS Sagsprofil,
-       CAST(c.Sagsstatus   AS NVARCHAR(256)) AS Sagsstatus,
-       CAST(c.Organisering AS NVARCHAR(256)) AS Organisering,
+   COLLATE DATABASE_DEFAULT: SELECT INTO tager GOStaging's sorteringsregel
+   (Danish_Norwegian_CI_AS) med, og tekst med DEN regel kommer ud af
+   driveren i Windows-1252 — "Åben" gav UnicodeDecodeError, også efter CAST
+   til NVARCHAR (20-11-2026, tools/tegnsaet_tjek.py). stg har databasens
+   egen regel og læses fint. */
+SELECT CAST(c.Sagsprofil   AS NVARCHAR(256)) COLLATE DATABASE_DEFAULT AS Sagsprofil,
+       CAST(c.Sagsstatus   AS NVARCHAR(256)) COLLATE DATABASE_DEFAULT AS Sagsstatus,
+       CAST(c.Organisering AS NVARCHAR(256)) COLLATE DATABASE_DEFAULT AS Organisering,
        (SELECT COUNT(*) FROM udvalg.Contacts)            AS kontakter,
        (SELECT COUNT(*) FROM udvalg.Foranstaltningsdata) AS foranstaltninger
 FROM   udvalg.Cases AS c;
