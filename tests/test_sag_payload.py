@@ -347,3 +347,24 @@ def test_artens_beskrivelse_uden_det_andet_id(tmp_path):
     d = Dokument(kilde_noegle="D", sag_noegle="S", titel="Indstilling",
                  fil_sti="S/1.docx", fil_navn="Indstilling.docx")
     assert loader.send(d, loader.payload(d)) == ("185", "journaliseret")
+
+
+# --- tom afdeling i GO (alle PPR-sager i dumpet, 20-11-2026) ----------------
+
+def test_tom_afdeling_slaas_op_paa_sagstypen():
+    from konvertering.loaders.sag import afdeling_noegle
+
+    assert afdeling_noegle({"afdeling_go": None, "sagstype_go": "ABA"}) == "<tom>|ABA"
+    assert afdeling_noegle({"afdeling_go": "  ", "sagstype_go": "ABA"}) == "<tom>|ABA"
+    assert afdeling_noegle({"afdeling_go": "PPR", "sagstype_go": "ABA"}) == "PPR"
+
+
+def test_tom_afdeling_uden_mapning_afvises_stadig():
+    """Ansættelsesstedet styrer adgangen på PPR-sager — det gættes aldrig."""
+    from konvertering.mapping import Kodelister, Opslag
+    from konvertering.sbsys.errors import ManglerMapping
+
+    m = Kodelister({("afdeling", "<tom>|ABA"): Opslag("15", "map")})
+    assert m.slaa_op("afdeling", "<tom>|ABA") == "15"
+    with pytest.raises(ManglerMapping):
+        m.slaa_op("afdeling", "<tom>|Psykolog")

@@ -17,6 +17,24 @@ from ..sbsys.errors import (
 )
 from .base import Loader, boelge_filter
 
+TOM_AFDELING = "<tom>"
+
+
+def afdeling_noegle(raekke: dict[str, Any]) -> str:
+    """Nøglen i kodelisten ``afdeling`` for sagens ansættelsessted.
+
+    GO's ``Cases.Afdeling`` er NULL på alle PPR-sager i dumpet (20-11-2026).
+    En tom afdeling slås derfor op som ``<tom>|<sagstype>`` — fx
+    ``<tom>|ABA`` — så ansættelsesstedet kan vælges pr. sagstype i
+    mapping/afdeling.csv. Mangler rækken, afvises sagen som før: på
+    PPR-skabelonerne styrer ansættelsesstedet adgangen til sagen
+    (AnvendSikkerhedFraAnsaettelsessted), så det må aldrig gættes.
+    """
+    afdeling = (raekke.get("afdeling_go") or "").strip()
+    if afdeling:
+        return afdeling
+    return f"{TOM_AFDELING}|{(raekke.get('sagstype_go') or '').strip()}"
+
 log = logging.getLogger(__name__)
 
 
@@ -60,7 +78,7 @@ class SagLoader(Loader[Sag]):
             # der er fratrådt skal stadig med over. De havner på en fælles
             # konto via 'standard'-handlingen i kodelisten.
             ansvarlig=m.slaa_op("bruger", raekke.get("ansvarlig_go"), paakraevet=False),
-            afdeling=m.slaa_op("afdeling", raekke.get("afdeling_go"), paakraevet=True),
+            afdeling=m.slaa_op("afdeling", afdeling_noegle(raekke), paakraevet=True),
             oprettet_dato=raekke.get("oprettet_dato"),
             afsluttet_dato=raekke.get("afsluttet_dato"),
             fortrolighed=m.slaa_op("fortrolighed", raekke.get("fortrolighed_go"), paakraevet=False),

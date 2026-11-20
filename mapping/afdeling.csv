@@ -1,1 +1,2 @@
 liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+afdeling;<tom>|ABA;GO har ingen afdeling (ABA-sager);15;PPR ABA Team - Psyk (2481);map;MIDLERTIDIG til testkonverteringen 20-11-2026. Cases.Afdeling er NULL paa alle PPR-sager, og ansaettelsesstedet styrer adgangen og skal besluttes af PPR/admins.;;
