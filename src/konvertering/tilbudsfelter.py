@@ -289,7 +289,13 @@ def _omsaet(katalog, kodelister, kolonne, raa, felt: Felt, advar) -> dict[str, A
         if felt.liste_id is None:
             advar(f"'{felt.navn}' er et listefelt uden liste")
             return None
-        oversat = kodelister.slaa_op(VAERDI_LISTE, f"{kolonne}|{raa}", paakraevet=False)
+        noegle = f"{kolonne}|{raa}"
+        if kodelister.er_udeladt(VAERDI_LISTE, noegle):
+            # Bevidst tomt (handling = ignorer), fx Betalingssted "PPR", der
+            # ikke findes i den nye opsætning. Det er en beslutning, ikke et
+            # fund — ingen advarsel, og ingen søgning efter "PPR" i listen.
+            return None
+        oversat = kodelister.slaa_op(VAERDI_LISTE, noegle, paakraevet=False)
         tekst = (oversat or raa).strip().casefold()
         muligheder = katalog.muligheder(int(felt.liste_id))
         traef = [m for m in muligheder

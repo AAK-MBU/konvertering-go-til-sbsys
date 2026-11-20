@@ -240,3 +240,14 @@ def test_valgmuligheden_kommer_altid_fra_feltets_egen_liste():
         MULIGHEDER.pop(202)
         TYPER.pop()
         FELTER.pop(10)
+
+
+# --- handling = ignorer: feltet tomt, uden advarsel -----------------------
+
+def test_ignoreret_vaerdi_giver_tomt_felt_uden_advarsel():
+    """Betalingssted "PPR" findes ikke i den nye opsætning (20-11-2026)."""
+    kodelister = _kodelister()
+    kodelister._poster[("tilbudsfeltvaerdi", "Indstillingsaarsag|PPR")] = Opslag(None, "ignorer")
+    katalog = TilbudsfeltKatalog(Klient(), Endpoints())
+    u = byg_feltvaerdier(katalog, kodelister, "Psykolog", 1, {"Indstillingsaarsag": "PPR"})
+    assert u.felt_vaerdier == [] and u.advarsler == []
