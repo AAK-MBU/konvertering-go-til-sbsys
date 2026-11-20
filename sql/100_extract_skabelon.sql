@@ -211,15 +211,25 @@ FROM (
 ) AS k
 GROUP  BY k.noegle, k.cpr, k.cvr;
 
-/* Relationen. Noeglen er sag + part, saa den er stabil og idempotent. */
+/* Relationen. Noeglen er sag + part, saa den er stabil og idempotent.
+
+   ÉN raekke pr. sag + part. Barnet staar baade som primaer part paa Cases
+   OG ofte blandt sagens Contacts — to raekker med forskellig rolle, og
+   DISTINCT slog dem ikke sammen: PK-brud paa den foerste rigtige sag
+   (20-11-2026). Den primaere rolle vinder; ellers den foerste rolle i
+   alfabetisk orden, saa resultatet er det samme hver gang. */
 INSERT INTO stg.sag_part (kilde_noegle, sag_noegle, part_noegle, rolle_go, primaer)
-SELECT DISTINCT
+SELECT
     r.sag_noegle + '|' + r.part_noegle,
     r.sag_noegle,
     r.part_noegle,
     r.rolle,
     r.primaer
 FROM (
+  SELECT r.*,
+         nr = ROW_NUMBER() OVER (PARTITION BY r.sag_noegle, r.part_noegle
+                                 ORDER BY r.primaer DESC, r.rolle)
+  FROM (
     SELECT sag_noegle  = c.[GOSagsID],
            part_noegle = NULLIF(LTRIM(RTRIM(c.[CPR])), N''),
            rolle       = N'Primær part',
@@ -237,8 +247,10 @@ FROM (
     FROM   GOStaging.dbo.[Contacts] AS k
     WHERE  COALESCE(NULLIF(LTRIM(RTRIM(k.[CPR])), N''),
                     NULLIF(LTRIM(RTRIM(k.[CVR])), N'')) IS NOT NULL
+  ) AS r
 ) AS r
-WHERE  EXISTS (SELECT 1 FROM stg.part p WHERE p.kilde_noegle = r.part_noegle COLLATE DATABASE_DEFAULT)
+WHERE  r.nr = 1
+  AND  EXISTS (SELECT 1 FROM stg.part p WHERE p.kilde_noegle = r.part_noegle COLLATE DATABASE_DEFAULT)
   AND  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = r.sag_noegle COLLATE DATABASE_DEFAULT);
 
 /* ================================================================== */

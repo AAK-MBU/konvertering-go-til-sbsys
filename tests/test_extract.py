@@ -185,3 +185,14 @@ def test_gostaging_mod_stg_sammenligninger_har_collate():
     uden = [f"{venstre}{resten}" for venstre, resten in sammenligninger
             if "COLLATE DATABASE_DEFAULT" not in resten]
     assert not uden, f"mangler COLLATE DATABASE_DEFAULT: {uden}"
+
+
+def test_sag_part_har_én_raekke_pr_sag_og_part():
+    """Barnet står både på Cases (primær) og i Contacts — PK-brud på den
+    første rigtige sag 20-11-2026. Den primære rolle skal vinde."""
+    kode = _kode()
+    blok = kode[kode.index("INSERT INTO stg.sag_part"):kode.index("DELETE FROM stg.dokument")]
+    assert "SELECT DISTINCT" not in blok
+    assert "PARTITION BY r.sag_noegle, r.part_noegle" in blok
+    assert "ORDER BY r.primaer DESC" in blok
+    assert "r.nr = 1" in blok
