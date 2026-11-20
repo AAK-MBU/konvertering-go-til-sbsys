@@ -397,3 +397,38 @@ def test_kald_kan_skrive_hele_svaret_til_en_fil():
 
     args = _parser().parse_args(["kald", "GET", "/bu_api/x", "--bu", "--ud", "liste.json"])
     assert str(args.ud) == "liste.json"
+
+
+# --- TEST_-variabler fra .env (sql/997_udvalg_kilde.sql) ------------------
+
+def test_test_variabel_hentes_fra_miljoeet(monkeypatch):
+    monkeypatch.setenv("TEST_ABA_SAGS_ID", "PPR-X")
+    sql, mangler = erstat_variabler("WHERE id = N'$(TEST_ABA_SAGS_ID)'", [])
+    assert sql == "WHERE id = N'PPR-X'" and not mangler
+
+
+def test_kun_test_variabler_hentes_fra_miljoeet(monkeypatch):
+    """Et script må aldrig kunne trække et kodeord ind i SQL'en."""
+    monkeypatch.setenv("SBSYS_PASSWORD", "hemmeligt")
+    sql, mangler = erstat_variabler("$(SBSYS_PASSWORD)", [])
+    assert "hemmeligt" not in sql and mangler == ["SBSYS_PASSWORD"]
+
+
+def test_apostrof_i_miljoevaerdi_kan_ikke_bryde_ud_af_strengen(monkeypatch):
+    monkeypatch.setenv("TEST_X", "a'; DROP TABLE x;--")
+    sql, _ = erstat_variabler("N'$(TEST_X)'", [])
+    assert sql == "N'a''; DROP TABLE x;--'"
+
+
+def test_var_paa_kommandolinjen_vinder_over_miljoeet(monkeypatch):
+    monkeypatch.setenv("TEST_X", "fra-env")
+    assert erstat_variabler("$(TEST_X)", ["TEST_X=fra-var"])[0] == "fra-var"
+
+
+def test_udvalg_scriptet_laeser_sagen_fra_env_og_kopierer_alle_syv_tabeller():
+    from pathlib import Path
+    sql = Path("sql/997_udvalg_kilde.sql").read_text(encoding="utf-8")
+    assert sql.count("$(TEST_ABA_SAGS_ID)") == 3
+    for tabel in ("Cases", "Contacts", "Documents", "DocumentSHA",
+                  "Foranstaltningsdata", "GOWorkflows", "JournalNotes"):
+        assert f"INTO udvalg.{tabel}" in sql

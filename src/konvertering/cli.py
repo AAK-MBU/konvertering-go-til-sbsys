@@ -169,6 +169,8 @@ def _env_diagnose(env_status: str) -> int:
 
 
 _VARIABEL = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_]*)(?:\|([^)]*))?\)")
+# Variabler med dette præfiks hentes fra miljøet (.env), hvis --var ikke giver dem.
+ENV_PRAEFIKS = "TEST_"
 
 
 def erstat_variabler(sql: str, tildelinger: list[str]) -> tuple[str, list[str]]:
@@ -197,6 +199,12 @@ def erstat_variabler(sql: str, tildelinger: list[str]) -> tuple[str, list[str]]:
         navn, standard = m.group(1), m.group(2)
         if navn in vaerdier:
             return vaerdier[navn]
+        if navn.startswith(ENV_PRAEFIKS) and (fra_env := os.environ.get(navn, "").strip()):
+            # Fra .env, så fx et rigtigt sagsnummer aldrig skal skrives på
+            # kommandolinjen eller i filen. Kun TEST_-navne: et script må
+            # aldrig kunne trække et kodeord ind i SQL'en. Apostroffer
+            # fordobles, da værdien står inde i en N'...'-streng.
+            return fra_env.replace("'", "''")
         if standard is not None:
             return standard
         mangler.append(navn)
