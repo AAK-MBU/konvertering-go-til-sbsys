@@ -34,6 +34,27 @@ class SqlScriptFejl(RuntimeError):
         self.aarsag = aarsag
 
 
+def indstil_tegnsaet(forbindelse: Any, pyodbc: Any) -> None:
+    """Danske bogstaver ind og ud af SQL Server — korrekt på Windows OG Linux.
+
+    Tidligere stod alt på UTF-8. På Windows læser ODBC-driveren de bytes som
+    Windows-1252, så alt VI skrev, blev gemt forvansket ("Åben" som
+    "Ã…ben"), og forvanskningen gik ud igen ved læsning. Det så rigtigt ud,
+    indtil der kom ægte data fra GOStaging: "Åben" gav UnicodeDecodeError
+    (20-11-2026, tools/tegnsaet_tjek.py).
+
+    * NVARCHAR (SQL_WCHAR) og al tekst vi SENDER: UTF-16LE — SQL Servers
+      egen Unicode-form. Ingen omkodning undervejs, på nogen platform.
+    * VARCHAR (SQL_CHAR): driveren afleverer i klientens tegnsæt —
+      Windows-1252 på Windows, UTF-8 på Linux — så det er det der læses med.
+    """
+    import locale
+
+    forbindelse.setdecoding(pyodbc.SQL_WCHAR, encoding="utf-16le")
+    forbindelse.setdecoding(pyodbc.SQL_CHAR, encoding=locale.getpreferredencoding(False))
+    forbindelse.setencoding(encoding="utf-16le")
+
+
 class Database:
     def __init__(self, indstillinger: DatabaseIndstillinger) -> None:
         self._i = indstillinger
@@ -47,10 +68,7 @@ class Database:
             timeout=self._i.timeout_sekunder,
             autocommit=False,
         )
-        # Danske tegn og hurtigere fetch af store tekstfelter
-        forbindelse.setdecoding(pyodbc.SQL_CHAR, encoding="utf-8")
-        forbindelse.setdecoding(pyodbc.SQL_WCHAR, encoding="utf-8")
-        forbindelse.setencoding(encoding="utf-8")
+        indstil_tegnsaet(forbindelse, pyodbc)
         return forbindelse
 
     @property
