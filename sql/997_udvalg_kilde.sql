@@ -63,8 +63,13 @@ BEGIN
 END
 GO
 
-/* Hvad der blev kopieret. Ingen persondata: kun typer og antal. */
-SELECT c.Sagsprofil, c.Sagsstatus, c.Organisering,
+/* Hvad der blev kopieret. Ingen persondata: kun typer og antal.
+   CAST til NVARCHAR: GOStaging's tekstkolonner er VARCHAR i Windows-1252,
+   og forbindelsen læser VARCHAR som UTF-8 — "Åben" gav UnicodeDecodeError
+   (20-11-2026). stg er NVARCHAR hele vejen og har ikke problemet. */
+SELECT CAST(c.Sagsprofil   AS NVARCHAR(256)) AS Sagsprofil,
+       CAST(c.Sagsstatus   AS NVARCHAR(256)) AS Sagsstatus,
+       CAST(c.Organisering AS NVARCHAR(256)) AS Organisering,
        (SELECT COUNT(*) FROM udvalg.Contacts)            AS kontakter,
        (SELECT COUNT(*) FROM udvalg.Foranstaltningsdata) AS foranstaltninger
 FROM   udvalg.Cases AS c;
