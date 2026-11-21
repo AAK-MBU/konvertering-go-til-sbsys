@@ -473,6 +473,16 @@ def _parser() -> argparse.ArgumentParser:
 
     under.add_parser("env", help="Vis hvilken .env der læses, og hvad der mangler")
 
+    vaerdi = under.add_parser(
+        "vaerdier", help="Værdimapping trin 1: saml GO's stavemåder til de værdier der er brug for")
+    v_under = vaerdi.add_subparsers(dest="vaerdier_kommando", required=True)
+    v_saml = v_under.add_parser(
+        "saml", help="Læs distinkte_vaerdier.xlsx og foreslå hvilke stavemåder der er samme værdi")
+    v_saml.add_argument("fil", type=Path, help="Excel-fil med én fane pr. GO-kolonne")
+    v_saml.add_argument("--ud", type=Path, default=Path("rapporter/vaerdier"))
+    v_saml.add_argument("--overskriv", action="store_true",
+                        help="Overskriv eksisterende filer — også en gennemgang du er i gang med")
+
     spec = under.add_parser(
         "spec", help="Læs SBSYS' egen OpenAPI-beskrivelse — stier, felter, nøglekandidater")
     spec.add_argument("hvad", choices=["stier", "noegle", "felt", "model", "soegning", "gem"],
@@ -508,6 +518,9 @@ def main(argv: list[str] | None = None) -> int:
     # Skal kunne køres NÅR konfigurationen fejler — derfor før valideringen.
     if args.kommando == "env":
         return _env_diagnose(env_status)
+    # Læser kun en Excel-fil og skriver CSV — ingen database, ingen SBSYS.
+    if args.kommando == "vaerdier":
+        return _vaerdier_saml(args)
 
     try:
         settings = Settings.fra_environment()
@@ -704,6 +717,38 @@ def _udfoer(args, settings: Settings) -> int:
     if args.kommando == "load":
         return _load(settings, args)
 
+    return 0
+
+
+def _vaerdier_saml(args: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from . import vaerdier
+
+    if not args.fil.exists():
+        print(f"Findes ikke: {args.fil}", file=sys.stderr)
+        return 2
+    resultat = vaerdier.saml(vaerdier.laes_xlsx(args.fil))
+    findes = [args.ud / f"{liste}-{slags}.csv"
+              for liste in resultat for slags in ("gennemsyn", "vaerdier")
+              if (args.ud / f"{liste}-{slags}.csv").exists()]
+    if findes and not args.overskriv:
+        print("Filerne findes allerede — måske med din gennemgang i. Intet er overskrevet:",
+              file=sys.stderr)
+        for sti in findes:
+            print(f"  {sti}", file=sys.stderr)
+        print("Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
+        return 1
+
+    print(f"{'liste':16}{'stavemåder':>11}{'værdier':>9}{'auto':>7}{'forslag':>9}{'afklar':>8}")
+    for liste, raekker in resultat.items():
+        status = Counter(r.status for r in raekker)
+        print(f"{liste:16}{len(raekker):>11}{len(vaerdier.vaerdiliste(raekker)):>9}"
+              f"{status['auto']:>7}{status['forslag']:>9}{status['afklar']:>8}")
+    for sti in vaerdier.skriv(resultat, args.ud):
+        print(f"  skrevet: {sti}")
+    print("\nGennemgå *-gennemsyn.csv: 'forslag' godkendes (ja/nej i 'godkendt'), "
+          "'afklar' kræver en beslutning. 'rettet_vaerdi' overskriver forslaget.")
     return 0
 
 
