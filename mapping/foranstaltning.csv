@@ -1,1 +1,23 @@
 liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+foranstaltning;ABA;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Dialogmøde;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Enkelt integration;PPR;1;PPR;map;Mappetypen — GO staver den med mellemrum. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Intern skole;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Personlig assistance;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Psykolog;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Pædagogisk fagkonsulent;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Specialklasse;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Specialskole;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Støtteressourcer;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Tale-hørekonsulent;PPR;1;PPR;map;Mappetypen. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Børnesamtaler;PPR;1;PPR;map;Mappetypen — data konverteres, tilbuddet gøres inaktivt efter. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Gruppeforløb - dagtilbud;PPR;1;PPR;map;Mappetypen — dagtilbud og skole bliver ét tilbud. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Gruppeforløb - skole;PPR;1;PPR;map;Mappetypen — dagtilbud og skole bliver ét tilbud. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Id hentes med konv opslag katalog mod PRODUKTION.;;
+foranstaltning;Back2School;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
+foranstaltning;Basisteam;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
+foranstaltning;Basisteam fortroligt;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
+foranstaltning;Cool Kids/Chilled;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
+foranstaltning;Fysioterapeut PPR;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
+foranstaltning;Konsulent;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
+foranstaltning;Tværgående trivselsteam;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;
+foranstaltning;Befordring;PPR;;;ignorer;Foranstaltningsdata skal IKKE konverteres (konverteringsarket). Sagen konverteres stadig.;;

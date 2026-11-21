@@ -167,6 +167,10 @@ class Indsats(KanoniskObjekt):
     antal_enheder: int | None = None
     enhedstype: str | None = None
     udslagsgivende_forhold: str | None = None
+    # Foranstaltningsmappens type (GO's Indholdstype) og rækkens øvrige
+    # kolonner — kilden til tilbudsfelterne, se tilbudsfelter.py.
+    mappetype: str | None = None
+    go_felter: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def objekttype(self) -> Objekttype:

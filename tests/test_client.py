@@ -96,6 +96,17 @@ def test_401_stopper_koerslen():
         k.kald("GET", "/api/sag", operation="hent")
 
 
+def test_401_kan_ses_naar_kalderen_beder_om_det():
+    """`konv kald` venter alle statusser og skal kunne vise hvorfor."""
+    svar401 = httpx.Response(401, text="audience er forkert",
+                             headers={"www-authenticate": 'Bearer error="invalid_token"'})
+    with _klient(lambda r: svar401) as k:
+        svar = k.kald("GET", "/bu_api/paragraf", operation="kald",
+                      forventede_status=tuple(range(100, 600)))
+    assert svar.status == 401
+    assert "invalid_token" in svar.headers["www-authenticate"]
+
+
 def test_timeout_genforsoeges():
     kald = {"n": 0}
 

@@ -38,7 +38,7 @@ så filerne åbner direkte i kolonner.
 | `go_tekst` | Læsbar tekst, så en fagperson kan genkende værdien |
 | `sbsys_vaerdi` | Det der sendes til SBSYS. Næsten altid et **id** fra SBSYS, ikke et navn |
 | `sbsys_tekst` | Læsbar tekst for SBSYS-siden |
-| `handling` | `map` (oversæt), `standard` (fælles reserveværdi), `bloker` (afvis objektet) |
+| `handling` | `map` (oversæt), `standard` (fælles reserveværdi), `bloker` (afvis objektet), `ignorer` (felt: tomt; for indsatsens mappetype: konverteres bevidst ikke, springes over) |
 | `kommentar` | Hvorfor. Skrives også af `mapping forbered` og `mapping mangler` |
 | `godkendt_af` | Valgfri — udfyldes i praksis ikke |
 | `godkendt_dato` | Valgfri — udfyldes i praksis ikke |
@@ -49,6 +49,24 @@ hvem der sagde god for en mapning, er det dér det skal skrives.
 
 En række med `handling = map` og tom `sbsys_vaerdi` tæller som uafklaret og
 kommer med i `konv mapping mangler`.
+
+## Produktion og testmiljø
+
+Filerne her i mappen er **produktionens** værdier. Testmiljøet har andre
+id'er og til dels andre feltnavne (fx "ABA gruppe1" for "ABA gruppe"), og
+dets afvigelser ligger i `mapping/testmiljoe/` — samme form, samme
+filnavne, kun de rækker der er anderledes.
+
+`konv mapping load` følger `KONV_MILJOE` i `.env`:
+
+| `KONV_MILJOE` | Indlæses |
+|---|---|
+| `test` (standard) | `mapping/*.csv`, og så `mapping/testmiljoe/*.csv` ovenpå |
+| `prod` | Kun `mapping/*.csv`. Testrækker der står tilbage, deaktiveres |
+
+Testrækkerne mærkes `TESTMILJØ:` i kommentaren. En produktionskørsel
+(`konv load` med `KONV_MILJOE=prod`) nægter at starte, hvis der stadig er
+aktive testrækker i `map.kodeliste`.
 
 ## Listerne
 
@@ -64,9 +82,9 @@ kommer med i `konv mapping mangler`.
 | `sagstype.csv`, `facet.csv`, `fortrolighed.csv`, `bevaring.csv` | diverse sagsfelter | nej | SBSYS' opsætning |
 | `dokumentkategori.csv` | GO-dokumenttype → `DokumentTypeId` | nej | SBSYS' opsætning |
 | `notattype.csv` | GO-notattype | nej | SBSYS' opsætning |
-| `paragraf.csv` | GO's `Bevillingstype` → `paragrafId` | **ja** | `konv opslag katalog` |
-| `foranstaltning.csv` | GO's `Ydelse` → `foranstaltningId` | **ja** | `konv opslag katalog` |
-| `tilbud.csv` | GO's `Ydelse` → `tilbudId` | **ja** | `konv opslag katalog` |
+| `paragraf.csv` | Foranstaltningsmappens type (`Indholdstype`) → `paragrafId` | **ja** | `konv opslag katalog` |
+| `foranstaltning.csv` | Mappetypen → `foranstaltningId` | **ja** | `konv opslag katalog` |
+| `tilbud.csv` | Mappetypen → `tilbudId` | **ja** | `konv opslag katalog` |
 | `enhedstype.csv` | GO's enhed → `Time`/`Doegn`/`Uge`/`Maaned`/`Aar`/`Stk` | nej | SBSYS' enum, se docs/09-indsatser.md |
 | `udslagsgivende_forhold.csv` | GO's årsag → id | nej | `konv opslag` mod `/bu_api/udslagsgivende_forhold` |
 
@@ -80,8 +98,14 @@ Hent hele hierarkiet fladet ud med:
 uv run konv opslag katalog
 ```
 
-Bemærk at `foranstaltning.csv` og `tilbud.csv` begge slår op på GO's
-`Ydelse`: samme GO-værdi, to forskellige SBSYS-id'er.
+Alle tre slår op på foranstaltningsmappens type (GO's `Indholdstype`):
+samme GO-værdi, tre forskellige SBSYS-id'er. Tilbuddet ER mappetypen
+(Psykolog, ABA ...), jf. konverteringsarket 17-11-2026. GO's `Ydelse` og
+`Bevillingstype` er almindelige tilbudsfelter, ikke tripellet.
+
+Typer hvis data ikke skal konverteres (Konsulent, Fysioterapeut PPR ...),
+står med `handling = ignorer` i alle tre. Deres indsatser springes over —
+ikke afvist — mens sagerne konverteres som normalt.
 
 ## Start med at lade maskinen gøre forarbejdet
 

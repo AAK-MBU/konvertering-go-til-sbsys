@@ -73,7 +73,8 @@ def test_db_koer_parses():
         ["db", "koer", "sql/900_afstemning.sql", "--var", "run_id=7", "--var", "boelge=ppr"]
     )
     assert args.db_kommando == "koer"
-    assert str(args.fil) == "sql/900_afstemning.sql"
+    # as_posix(): på Windows bliver stien sql\900_afstemning.sql
+    assert args.fil.as_posix() == "sql/900_afstemning.sql"
     assert args.var == ["run_id=7", "boelge=ppr"]
 
 
@@ -327,3 +328,107 @@ def test_intet_resultatsaet_giver_ingen_stoej(capsys):
 
     _udskriv_tabel([])
     assert capsys.readouterr().out == ""
+
+
+# --- filscanningens resultat skal faktisk lande ------------------------
+#
+# 16-11-2026: `filer scan` meldte "ok: 3, mangler: 1", men fil_status stod
+# NULL på alle fire dokumenter. UPDATE'en kørte med fast_executemany og
+# matchede ingenting — uden fejl. Dokumentet uden fil kom derfor med på
+# arbejdslisten og blev kun stoppet af kontrollen lige før afsendelse.
+
+class _ScanDb:
+    def __init__(self, beroert: int | None = None) -> None:
+        self.beroert = beroert
+        self.kald: list[dict] = []
+
+    def udfoer_mange(self, sql, raekker, **kw):
+        self.kald.append({"sql": sql, "raekker": raekker, **kw})
+        return len(raekker) if self.beroert is None else self.beroert
+
+
+def test_filstatus_skrives_ikke_med_fast_executemany():
+    from konvertering.cli import _gem_filstatus
+
+    db = _ScanDb()
+    _gem_filstatus(db, [("ok", 1, None, "text/plain", "D1")])
+    assert db.kald[0].get("hurtig", False) is False
+
+
+def test_filstatus_der_ikke_lander_stopper_scanningen():
+    from konvertering.cli import _gem_filstatus
+    from konvertering.sbsys.errors import KonverteringsFejl
+
+    db = _ScanDb(beroert=0)
+    with pytest.raises(KonverteringsFejl) as e:
+        _gem_filstatus(db, [("ok", 1, None, "text/plain", "D1"),
+                            ("mangler", None, None, None, "D2")])
+    assert "0 af 2" in str(e.value)
+
+
+def test_filstatus_der_lander_er_stille():
+    from konvertering.cli import _gem_filstatus
+
+    _gem_filstatus(_ScanDb(), [("ok", 1, None, "text/plain", "D1")])
+
+
+def test_udfoer_mange_er_sikker_som_standard():
+    """Den hurtige tilstand har to gange matchet ingenting uden fejl. Den
+    skal vælges bevidst, ikke være det man får af sig selv."""
+    import inspect
+
+    from konvertering.db import Database
+
+    assert inspect.signature(Database.udfoer_mange).parameters["hurtig"].default is False
+
+
+def test_kald_har_en_bu_genvej():
+    """`konv kald GET /bu_api/... --bu` bruger SBSYS_BU_BASE_URL fra .env,
+    så adressen ikke skal skrives (og kopieres forkert) i hvert kald."""
+    from konvertering.cli import _parser
+
+    args = _parser().parse_args(["kald", "GET", "/bu_api/paragraf", "--bu"])
+    assert args.bu is True
+
+
+def test_kald_kan_skrive_hele_svaret_til_en_fil():
+    """Skærmen klipper ved 20.000 tegn; en værdiliste er længere."""
+    from konvertering.cli import _parser
+
+    args = _parser().parse_args(["kald", "GET", "/bu_api/x", "--bu", "--ud", "liste.json"])
+    assert str(args.ud) == "liste.json"
+
+
+# --- TEST_-variabler fra .env (sql/997_udvalg_kilde.sql) ------------------
+
+def test_test_variabel_hentes_fra_miljoeet(monkeypatch):
+    monkeypatch.setenv("TEST_ABA_SAGS_ID", "PPR-X")
+    sql, mangler = erstat_variabler("WHERE id = N'$(TEST_ABA_SAGS_ID)'", [])
+    assert sql == "WHERE id = N'PPR-X'" and not mangler
+
+
+def test_kun_test_variabler_hentes_fra_miljoeet(monkeypatch):
+    """Et script må aldrig kunne trække et kodeord ind i SQL'en."""
+    monkeypatch.setenv("SBSYS_PASSWORD", "hemmeligt")
+    sql, mangler = erstat_variabler("$(SBSYS_PASSWORD)", [])
+    assert "hemmeligt" not in sql and mangler == ["SBSYS_PASSWORD"]
+
+
+def test_apostrof_i_miljoevaerdi_kan_ikke_bryde_ud_af_strengen(monkeypatch):
+    monkeypatch.setenv("TEST_X", "a'; DROP TABLE x;--")
+    sql, _ = erstat_variabler("N'$(TEST_X)'", [])
+    assert sql == "N'a''; DROP TABLE x;--'"
+
+
+def test_var_paa_kommandolinjen_vinder_over_miljoeet(monkeypatch):
+    monkeypatch.setenv("TEST_X", "fra-env")
+    assert erstat_variabler("$(TEST_X)", ["TEST_X=fra-var"])[0] == "fra-var"
+
+
+def test_udvalg_scriptet_laeser_sagen_fra_env_og_kopierer_alle_syv_tabeller():
+    from pathlib import Path
+    sql = Path("sql/997_udvalg_kilde.sql").read_text(encoding="utf-8")
+    assert sql.count("$(TEST_ABA_SAGS_ID)") == 3
+    for tabel in ("Cases", "Contacts", "Documents", "DocumentSHA",
+                  "Foranstaltningsdata", "GOWorkflows", "JournalNotes"):
+        assert f"INTO udvalg.{tabel}" in sql

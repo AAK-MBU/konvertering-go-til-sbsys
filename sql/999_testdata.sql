@@ -49,14 +49,23 @@ USING (VALUES
     ('kle',      N'17.01.05', N'17.01.05', 'map'),
     ('kle',      N'27.24.03', N'27.24.03', 'map'),
     ('sagstype', N'PPR-sag',  N'1',        'map'),
+    /* Sagsskabelonen er blokerende: uden den afvises hver eneste sag med
+       manglende_mapping, foer noget andet bliver afproevet. Id'et er
+       opdigtet — attrappen validerer det ikke. Mod et rigtigt SBSYS skal
+       det vaere et id fra `konv opslag skabeloner`. */
+    ('sagsskabelon', N'PPR-sag', N'332',   'map'),
     ('afdeling', N'PPR Nord', N'4711',     'map'),
     ('bruger',   N'ab1234',   N'9000',     'map'),
     /* Bevidst uden sbsys_vaerdi: skal udløse en afvisning */
     ('kle',      N'GO-LOKAL-042', NULL,    'map'),
-    /* Indsatser: GO's Ydelse og Bevillingstype -> SBSYS' tripel */
-    ('paragraf',        N'SEL 11.3',         N'1', 'map'),
-    ('foranstaltning',  N'Psykologsamtaler', N'1', 'map'),
-    ('tilbud',          N'Psykologsamtaler', N'1', 'map')
+    /* Indsatser: mappetypen -> SBSYS' tripel (alle tre slaas op paa typen) */
+    ('paragraf',        N'Psykolog',  N'1', 'map'),
+    ('foranstaltning',  N'Psykolog',  N'1', 'map'),
+    ('tilbud',          N'Psykolog',  N'1', 'map'),
+    /* En type der bevidst ikke konverteres: indsatsen springes over */
+    ('paragraf',        N'Konsulent', NULL, 'ignorer'),
+    ('foranstaltning',  N'Konsulent', NULL, 'ignorer'),
+    ('tilbud',          N'Konsulent', NULL, 'ignorer')
 ) AS s (liste, go_vaerdi, sbsys_vaerdi, handling)
 ON t.liste = s.liste AND t.go_vaerdi = s.go_vaerdi
 WHEN NOT MATCHED THEN
@@ -109,6 +118,20 @@ VALUES
     /* Filen findes ikke -> skal give fil_status = 'mangler' */
     ('TEST-DOK-004', 'TEST-SAG-002', 'ppr', N'Bortkommet bilag', N'Notat', '2023-05-05', 'indgaaende', 'PPR-2023-000002-001/99999999.txt', '99999999.txt');
 
+/* --- En kladde ------------------------------------------------------
+   GO's Journaliseret = 0. Skal ende under Kladder i SBSYS — ikke under
+   Dokumenter — via POST /api/kladde. Filnavnet er bevidst et "rigtigt"
+   navn med mellemrum og endelse, saa kladdens Navn, Filnavn og
+   Filendelse kan ses i SBSYS. Filen paa disken hedder 16391285.docx,
+   som dokument-id'et — praecis som paa GO's fileshare. */
+INSERT INTO stg.dokument
+    (kilde_noegle, sag_noegle, boelge, titel, kategori_go, dokument_dato,
+     retning, er_kladde, fil_relativ_sti, fil_navn)
+VALUES
+    ('TEST-DOK-005', 'TEST-SAG-001', 'ppr', N'Udkast til handleplan', N'Notat',
+     '2023-02-10', 'internt', 1,
+     'PPR-2023-000001-001/16391285.docx', N'Udkast til handleplan.docx');
+
 PRINT 'Testdata indlæst:';
 PRINT '  5 sager i boelgen ppr — to af dem skal afvises (manglende mapping)';
 PRINT '  4 dokumenter — et af dem har ingen fil';
@@ -129,19 +152,26 @@ VALUES
 GO
 
 /* --- Indsatser ------------------------------------------------------
-   Den sidste har en ukendt ydelse og skal afvises med manglende_mapping,
-   saa reparationssloejfen kan proeves. Oekonomifelterne er med vilje
-   ikke repraesenteret: oekonomi er ikke en del af konverteringen.      */
+   Tilbuddet er mappetypen (indholdstype_go). Med:
+     001  almindelig, afsluttet
+     002  aaben indsats: ingen slutdato
+     003  ukendt mappetype -> skal afvises med manglende_mapping
+     004  tom Fra-dato -> skal sendes med 1900-01-01 (konverteringsarket)
+     005  Konsulent -> konverteres bevidst ikke, springes over
+   Oekonomifelterne er med vilje ikke repraesenteret: oekonomi er ikke en
+   del af konverteringen.                                               */
 INSERT INTO stg.indsats
-    (kilde_noegle, sag_noegle, boelge, ydelse_go, bevillingstype_go,
+    (kilde_noegle, sag_noegle, boelge, indholdstype_go, ydelse_go, bevillingstype_go,
      periode_start, periode_slut, antal_enheder, enhedstype_go)
 VALUES
-    ('TEST-INDSATS-001', 'TEST-SAG-001', 'ppr', N'Psykologsamtaler', N'SEL 11.3',
+    ('TEST-INDSATS-001', 'TEST-SAG-001', 'ppr', N'Psykolog', NULL, NULL,
      '2023-02-01', '2023-12-31', 12, N'Time'),
-    /* Aaben indsats: ingen slutdato */
-    ('TEST-INDSATS-002', 'TEST-SAG-001', 'ppr', N'Psykologsamtaler', N'SEL 11.3',
+    ('TEST-INDSATS-002', 'TEST-SAG-001', 'ppr', N'Psykolog', NULL, NULL,
      '2024-01-15', NULL, NULL, NULL),
-    /* Ukendt ydelse -> skal afvises, ikke sendes */
-    ('TEST-INDSATS-003', 'TEST-SAG-001', 'ppr', N'GO-UKENDT-YDELSE', N'SEL 11.3',
-     '2024-03-01', NULL, NULL, NULL);
+    ('TEST-INDSATS-003', 'TEST-SAG-001', 'ppr', N'GO-UKENDT-TYPE', NULL, NULL,
+     '2024-03-01', NULL, NULL, NULL),
+    ('TEST-INDSATS-004', 'TEST-SAG-001', 'ppr', N'Psykolog', NULL, NULL,
+     NULL, NULL, NULL, NULL),
+    ('TEST-INDSATS-005', 'TEST-SAG-001', 'ppr', N'Konsulent', NULL, NULL,
+     '2023-05-01', NULL, NULL, NULL);
 GO

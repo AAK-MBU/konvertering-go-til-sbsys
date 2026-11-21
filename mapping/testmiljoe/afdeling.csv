@@ -1,0 +1,3 @@
+liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+afdeling;PPR Nord;;5;PPR;map;TESTMILJØ: Falske testdata (sql/999_testdata.sql). Kontoen skal have rettigheder dér, ellers 403. Id/navn fra testmiljøet 16-18/11-2026;;
+afdeling;PPR;;5;PPR;map;TESTMILJØ: Falsk GOStaging (sql/998_gofake_kilde.sql). Id/navn fra testmiljøet 16-18/11-2026;;

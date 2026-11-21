@@ -63,6 +63,26 @@ class IdMap:
         post = self.hent(objekt_type, kilde_noegle)
         return post.sbsys_id if post and post.status == "loaded" else None
 
+    def kendte_sbsys_id(self, objekt_type: Objekttype | str, sbsys_ider: list[str]) -> set[str]:
+        """Hvilke af disse SBSYS-id'er har konverteringen selv registreret?
+
+        Bruges når et opslag i SBSYS finder flere ens objekter: dem vi
+        kender, er allerede oprettet af os og kan ikke være det tabte.
+        """
+        if not sbsys_ider:
+            return set()
+        pladser = ", ".join("?" for _ in sbsys_ider)
+        raekker = self._db.hent_alle(
+            f"""
+            SELECT sbsys_id FROM konv.id_map
+            WHERE  kilde_system = ? AND objekt_type = ? AND sbsys_id IN ({pladser})
+            """,
+            self._kilde,
+            str(objekt_type),
+            *sbsys_ider,
+        )
+        return {str(r["sbsys_id"]) for r in raekker}
+
     # -- reservation og resultat --------------------------------------
 
     def reserver(
@@ -359,7 +379,7 @@ def oprettede_objekter(
 
     return db.hent_alle(
         f"""
-        SELECT objekt_type, kilde_noegle, sbsys_id, boelge, run_id, opdateret
+        SELECT objekt_type, kilde_noegle, sbsys_id, sbsys_nummer, boelge, run_id, opdateret
         FROM   konv.id_map
         WHERE  {' AND '.join(hvor)}
         ORDER  BY CASE objekt_type

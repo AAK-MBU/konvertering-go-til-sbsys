@@ -51,9 +51,10 @@ IF COL_LENGTH('stg.sag', 'organisering_go') IS NULL
     ALTER TABLE stg.sag ADD organisering_go NVARCHAR(50) NULL;
 GO
 
-IF COL_LENGTH('stg.dokument', 'er_kladde') IS NULL
-    ALTER TABLE stg.dokument ADD er_kladde BIT NOT NULL DEFAULT 0;
-GO
+/* stg.dokument.er_kladde tilfoejes EFTER CREATE TABLE stg.dokument laengere
+   nede. Stod den her, fejlede `konv db init` paa en tom database: COL_LENGTH
+   er NULL naar tabellen ikke findes, og saa forsoegte den at aendre en
+   tabel der endnu ikke var oprettet. */
 
 
 IF OBJECT_ID('stg.part') IS NULL
@@ -104,11 +105,17 @@ CREATE TABLE stg.dokument (
     fil_navn        NVARCHAR(400) NULL,
     fil_stoerrelse  BIGINT        NULL,
     fil_sha256      CHAR(64)      NULL,       -- udfyldes af `konv filer scan`
-    fil_status      VARCHAR(20)   NULL,       -- ok | mangler | tom | laast
+    fil_status      VARCHAR(20)   NULL,       -- ok | mangler | tvetydig | tom | for_stor
     mime            NVARCHAR(150) NULL,
     raa_json        NVARCHAR(MAX) NULL,
     indlaest        DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
 );
+GO
+
+/* Til databaser hvor stg.dokument blev oprettet foer er_kladde fandtes.
+   Staar EFTER CREATE TABLE, saa den aldrig rammer en tabel der ikke findes. */
+IF COL_LENGTH('stg.dokument', 'er_kladde') IS NULL
+    ALTER TABLE stg.dokument ADD er_kladde BIT NOT NULL DEFAULT 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
@@ -187,8 +194,12 @@ CREATE TABLE stg.indsats (
     kilde_noegle        VARCHAR(200)  NOT NULL PRIMARY KEY,
     sag_noegle          VARCHAR(200)  NOT NULL,
     boelge              VARCHAR(40)   NULL,
-    /* GO's Ydelse og Bevillingstype — oversaettes til SBSYS' tripel
-       (paragraf, foranstaltning, tilbud) via kodelisterne. */
+    /* Foranstaltningsmappens type (Psykolog, ABA ...). Den bestemmer SBSYS'
+       tripel (paragraf, foranstaltning, tilbud) via kodelisterne — tilbuddet
+       ER mappetypen (konverteringsarket 17-11-2026). */
+    indholdstype_go     NVARCHAR(256) NULL,
+    /* Ydelse og Bevillingstype er almindelige tilbudsfelter (paa hhv. ABA
+       og Stoetteressourcer), ikke tripellet. Gemt til tilbudsfelterne. */
     ydelse_go           NVARCHAR(200) NULL,
     bevillingstype_go   NVARCHAR(200) NULL,
     periode_start       DATETIME2(3)  NULL,
@@ -201,6 +212,12 @@ CREATE TABLE stg.indsats (
     raa_json            NVARCHAR(MAX) NULL,
     indlaest            DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
 );
+GO
+
+/* Til databaser hvor stg.indsats blev oprettet foer indholdstype_go fandtes.
+   EFTER CREATE TABLE og FOER viewet, som udfolder i.* naar det oprettes. */
+IF COL_LENGTH('stg.indsats', 'indholdstype_go') IS NULL
+    ALTER TABLE stg.indsats ADD indholdstype_go NVARCHAR(256) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes

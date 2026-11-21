@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..files import FILSTATUS_OK
+from ..hashing import kort_noegle
 from ..models import Dokument, Objekttype, Retning
 from ..sbsys.errors import FilFejl, PermanentFejl
 from .base import Loader, boelge_filter
@@ -86,7 +87,8 @@ class DokumentLoader(Loader[Dokument]):
                 "titel": objekt.titel,
                 "kategori": objekt.kategori,
                 "dokument_dato": objekt.dokument_dato.isoformat() if objekt.dokument_dato else None,
-                "retning": str(objekt.retning),
+                # Ingen retning: JournaliserDokumentInputDtoV10 har intet felt
+                # til den, og GO har heller ikke et ind-/udgaaende-begreb (A21).
                 "forfatter": objekt.forfatter,
                 # Ingen ekstern_noegle: besluttet 11-11-2026 at GO-nøglen IKKE
                 # skrives ind i SBSYS, heller ikke hvor feltet findes.
@@ -100,13 +102,13 @@ class DokumentLoader(Loader[Dokument]):
         sbsys_sag_id = self.k.idmap.sbsys_id(Objekttype.SAG, objekt.sag_noegle)
         if not sbsys_sag_id:
             raise PermanentFejl(
-                f"Sagen {objekt.sag_noegle[:12]} er ikke indlæst endnu — "
+                f"Sagen {kort_noegle(objekt.sag_noegle)} er ikke indlæst endnu — "
                 f"dokumentet kan ikke placeres"
             )
 
         # Filen findes og verificeres FØR metadata oprettes, så vi ikke
         # efterlader tomme dokumentskaller i SBSYS.
-        resultat = self.k.filer.undersoeg(objekt.fil_sti, objekt.fil_navn, beregn_checksum=False)
+        resultat = self.k.filer.undersoeg(objekt.fil_sti, beregn_checksum=False)
         if resultat.status != FILSTATUS_OK or resultat.sti is None:
             raise FilFejl(resultat.besked or "Filen kunne ikke bruges",
                           regel=f"fil_{resultat.status}", sti=objekt.fil_sti)
@@ -131,12 +133,37 @@ class DokumentLoader(Loader[Dokument]):
             kontekst={"objekt_type": "dokument", "kilde_noegle": objekt.kilde_noegle},
         )
         krop = svar.krop or {}
-        # Kladden svarer med ID/KladdeID, dokumentet med Id/DokumentId.
-        dokument_id = (krop.get("Id") or krop.get("id") or krop.get("DokumentId")
-                       or krop.get("ID") or krop.get("KladdeID"))
+        # Både kladder og dokumenter har TO id'er: registreringens (på denne
+        # sag) og det underliggende objekts. SBSYS arbejder med
+        # registreringens — GET/PUT/DELETE, arkivering, journalisering og
+        # delforløb tager alle et registrerings-id. Bekræftet i testmiljøet
+        # 17-11-2026:
+        #   kladde:   ID = 183 (GET /api/kladde/183 finder den),
+        #             KladdeID = 199 (GET /api/kladde/199 giver 404).
+        #             At ID også var sagens id (183), var et tilfælde:
+        #             en kladde nr. 2 på sag 183 fik ID = 185.
+        #   dokument: Id = 185 (registreringen), DokumentID = 187.
+        # Ingen fallback til KladdeID/DokumentID: det ville gemme et id der
+        # ligner det rigtige, men ikke kan bruges til noget.
+        felter = ("ID",) if objekt.er_kladde else ("Id", "id")
+        dokument_id = next((krop[f] for f in felter if krop.get(f)), None)
         if not dokument_id:
             raise PermanentFejl(
                 f"SBSYS returnerede intet id fra {navn}",
                 korrelations_id=svar.korrelations_id,
             )
-        return str(dokument_id), None
+        # Kladder og journaliserede dokumenter nummereres hver for sig i
+        # SBSYS: kladde 185 og dokument 185 er to forskellige ting
+        # (testmiljøet 17-11-2026). Begge står som 'dokument' i id_map, så
+        # arten skrives med i sbsys_nummer — ellers kan den der rydder op
+        # ikke se hvilket kald der sletter hvad. Det andet id kommer med,
+        # fordi den endelige sletning af et dokument tager DokumentID.
+        if objekt.er_kladde:
+            beskrivelse = _beskriv("kladde", "KladdeID", krop.get("KladdeID"))
+        else:
+            beskrivelse = _beskriv("journaliseret", "DokumentID", krop.get("DokumentID"))
+        return str(dokument_id), beskrivelse
+
+
+def _beskriv(art: str, felt: str, vaerdi: Any) -> str:
+    return f"{art} {felt}={vaerdi}" if vaerdi else art
