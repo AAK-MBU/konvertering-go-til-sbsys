@@ -728,7 +728,14 @@ def _vaerdier_saml(args: argparse.Namespace) -> int:
     if not args.fil.exists():
         print(f"Findes ikke: {args.fil}", file=sys.stderr)
         return 2
-    resultat = vaerdier.saml(vaerdier.laes_xlsx(args.fil))
+    faner, sprunget_over = vaerdier.laes_xlsx(args.fil)
+    for fane in sprunget_over:
+        print(f"Springer fanen {fane} over: {vaerdier.UDELADTE_FANER[fane]}")
+    try:
+        resultat = vaerdier.saml(faner)
+    except ValueError as e:
+        print(f"Intet skrevet. {e}", file=sys.stderr)
+        return 1
     findes = [args.ud / f"{liste}-{slags}.csv"
               for liste in resultat for slags in ("gennemsyn", "vaerdier")
               if (args.ud / f"{liste}-{slags}.csv").exists()]

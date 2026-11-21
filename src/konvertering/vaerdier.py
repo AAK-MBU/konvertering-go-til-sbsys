@@ -55,6 +55,12 @@ MAALLISTE: dict[str, str] = {
     "Klassetrin": "klassetrin",
 }
 
+# Faner der BEVIDST ikke behandles her, og hvorfor. Læses slet ikke.
+UDELADTE_FANER: dict[str, str] = {
+    "Sagsbehandler": "medarbejdernavne. Mappes til SBSYS-brugere (AZ-ident), "
+                     "ikke ved at samle stavemåder, og skal ikke i CSV-filer",
+}
+
 DANSKE_KOMMUNER = frozenset("""
 Albertslund Allerød Assens Ballerup Billund Bornholm Brøndby Brønderslev
 Dragør Egedal Esbjerg Fanø Favrskov Faxe Fredensborg Fredericia Frederiksberg
@@ -164,6 +170,7 @@ class Raekke:
 
 def saml(vaerdier: dict[str, list[object]]) -> dict[str, list[Raekke]]:
     """GO-kolonne -> rå værdier  =>  liste -> gennemsynsrækker."""
+    vaerdier = {k: v for k, v in vaerdier.items() if k not in UDELADTE_FANER}
     ukendte = sorted(set(vaerdier) - set(MAALLISTE))
     if ukendte:
         raise ValueError(f"Ukendte faner: {', '.join(ukendte)}. Kendte: {', '.join(MAALLISTE)}")
@@ -436,14 +443,19 @@ def vaerdiliste(raekker: list[Raekke]) -> list[dict[str, str]]:
     ]
 
 
-def laes_xlsx(sti: Path) -> dict[str, list[object]]:
-    """Én fane pr. GO-kolonne, første række er overskriften."""
+def laes_xlsx(sti: Path) -> tuple[dict[str, list[object]], list[str]]:
+    """Én fane pr. GO-kolonne, første række er overskriften.
+
+    Returnerer (faner, navnene på de udeladte faner). En udeladt fane
+    læses ikke — dens indhold kommer aldrig ind i programmet.
+    """
     import openpyxl
 
     bog = openpyxl.load_workbook(sti, read_only=True, data_only=True)
     try:
-        return {ark.title: [r[0] for r in ark.iter_rows(min_row=2, values_only=True) if r]
-                for ark in bog.worksheets}
+        faner = {ark.title: [r[0] for r in ark.iter_rows(min_row=2, values_only=True) if r]
+                 for ark in bog.worksheets if ark.title not in UDELADTE_FANER}
+        return faner, [navn for navn in bog.sheetnames if navn in UDELADTE_FANER]
     finally:
         bog.close()
 

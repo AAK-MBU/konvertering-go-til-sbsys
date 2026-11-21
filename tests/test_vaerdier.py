@@ -130,13 +130,41 @@ def test_xxx_og_aendret_skal_afklares():
     assert r["XXXBørnehuset Tulshøjvej 5 [366]"].status == "afklar"
 
 
+def test_sagsbehandler_springes_over_og_laeses_ikke(tmp_path):
+    import openpyxl
+
+    bog = openpyxl.Workbook()
+    bog.active.title = "Klassetrin"
+    bog.active.append(["Klassetrin"])
+    bog.active.append(["3"])
+    ark = bog.create_sheet("Sagsbehandler")
+    ark.append(["Sagsbehandler"])
+    ark.append(["Fiktiv Medarbejder"])
+    sti = tmp_path / "v.xlsx"
+    bog.save(sti)
+
+    faner, sprunget_over = vaerdier.laes_xlsx(sti)
+    assert set(faner) == {"Klassetrin"}
+    assert sprunget_over == ["Sagsbehandler"]
+    assert "Fiktiv Medarbejder" not in repr(faner)
+
+
+def test_cli_ukendt_fane_giver_ren_fejl(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(vaerdier, "laes_xlsx", lambda sti: ({"Noget": ["x"]}, []))
+    fil = tmp_path / "in.xlsx"
+    fil.write_bytes(b"")
+    assert cli.main(["vaerdier", "saml", str(fil), "--ud", str(tmp_path / "ud")]) == 1
+    assert "Ukendte faner: Noget" in capsys.readouterr().err
+    assert not (tmp_path / "ud").exists()
+
+
 def test_ukendt_fane_afvises():
     with pytest.raises(ValueError, match="Ukendte faner"):
-        saml({"Sagsbehandler": ["x"]})
+        saml({"Noget": ["x"]})
 
 
 def test_cli_skriver_og_overskriver_ikke(tmp_path, monkeypatch):
-    monkeypatch.setattr(vaerdier, "laes_xlsx", lambda sti: {"Klassetrin": ["1", "2"]})
+    monkeypatch.setattr(vaerdier, "laes_xlsx", lambda sti: ({"Klassetrin": ["1", "2"]}, []))
     fil = tmp_path / "in.xlsx"
     fil.write_bytes(b"")
     ud = tmp_path / "ud"
