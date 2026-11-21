@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -18,6 +19,9 @@ from ..sbsys.errors import (
 from .base import Loader, boelge_filter
 
 TOM_AFDELING = "<tom>"
+# Tvinger ÉN sagsbehandler (AZ-ident) på alle sager. Kun til test: PPR-sager
+# er beskyttede, og den der tester, skal kunne se sagen i brugerfladen.
+TVUNGEN_SAGSBEHANDLER = "TEST_SAGSBEHANDLER_AZ"
 
 
 def afdeling_noegle(raekke: dict[str, Any]) -> str:
@@ -47,6 +51,9 @@ class SagLoader(Loader[Sag]):
         self._part_cache: dict[str, int] = {}
         # kilde_noegle -> (CPR/CVR formateret til SBSYS, er_firma). Til genfindingen.
         self._part_nummer: dict[str, tuple[str, bool]] = {}
+        # AZ-ident (casefold) -> SBSYS-bruger-id, eller None hvis ikke fundet.
+        self._bruger_cache: dict[str, int | None] = {}
+        self._tvungen_advaret = False
 
     def hent_arbejde(self, graense: int | None = None) -> Iterable[dict[str, Any]]:
         # Sideopdelt efter nøgle, ikke streamet: loaderen skriver til
@@ -77,7 +84,7 @@ class SagLoader(Loader[Sag]):
             # Ukendt sagsbehandler er ikke blokerende: sager fra medarbejdere
             # der er fratrådt skal stadig med over. De havner på en fælles
             # konto via 'standard'-handlingen i kodelisten.
-            ansvarlig=m.slaa_op("bruger", raekke.get("ansvarlig_go"), paakraevet=False),
+            ansvarlig=self._ansvarlig(raekke),
             afdeling=m.slaa_op("afdeling", afdeling_noegle(raekke), paakraevet=True),
             oprettet_dato=raekke.get("oprettet_dato"),
             afsluttet_dato=raekke.get("afsluttet_dato"),
@@ -249,6 +256,68 @@ class SagLoader(Loader[Sag]):
             self.k.endpoints.felt("part", "part_type"): "Firma" if er_firma else "Person",
         }
 
+    def _ansvarlig(self, raekke: dict[str, Any]) -> str | None:
+        """Sagsbehandleren som SBSYS-bruger-id.
+
+        PPR-skabelonerne er beskyttede (ErBeskyttet), og så KRÆVER SBSYS en
+        behandler — ellers HTTP 400 "Sagen skal beskyttes, men skabelonen
+        angiver ikke en behandler" (prod 20-11-2026). Rækkefølgen:
+
+        1. ``TEST_SAGSBEHANDLER_AZ`` i .env tvinger én behandler på alle
+           sager. Kun til test; der advares ved hver kørsel.
+        2. En række i mapping/bruger.csv (GO-login -> SBSYS-id).
+        3. GO's egen sagsbehandler, slået op i SBSYS på AZ-identen. Samme
+           AD-identitet i begge systemer — ikke et gæt.
+
+        Findes ingen, sendes intet, og SBSYS afviser en beskyttet sag.
+        """
+        tvungen = os.environ.get(TVUNGEN_SAGSBEHANDLER, "").strip()
+        if tvungen:
+            if not self._tvungen_advaret:
+                log.warning("%s er sat: ALLE sager får samme sagsbehandler. "
+                            "Kun til test.", TVUNGEN_SAGSBEHANDLER)
+                self._tvungen_advaret = True
+            bruger_id = self._bruger_id(tvungen)
+            if bruger_id is None:
+                raise ValideringsFejl(
+                    f"{TVUNGEN_SAGSBEHANDLER} findes ikke som bruger i SBSYS",
+                    regel="sagsbehandler_ikke_i_sbsys", felt="ansvarlig",
+                )
+            return str(bruger_id)
+
+        go = raekke.get("ansvarlig_go")
+        mappet = self.k.kodelister.slaa_op("bruger", go, paakraevet=False)
+        if mappet:
+            return mappet
+        if go and str(go).strip():
+            bruger_id = self._bruger_id(str(go))
+            if bruger_id is not None:
+                return str(bruger_id)
+            log.warning("Sag %s: GO's sagsbehandler findes ikke i SBSYS",
+                        kort_noegle(str(raekke.get("kilde_noegle"))))
+        return None
+
+    def _bruger_id(self, az: str) -> int | None:
+        """AZ-ident -> SBSYS-bruger-id via brugersøgningen. Huskes for kørslen.
+
+        Kun ét PRÆCIST træf tæller. LogonId sammenlignes uden domæne
+        (``AAK\\az12345``, ``az12345@...``) og uden hensyn til store/små
+        bogstaver; søger SBSYS bredere end på identen, filtreres det fra her.
+        """
+        noegle = _logon(az)
+        if noegle in self._bruger_cache:
+            return self._bruger_cache[noegle]
+        op = self.k.endpoints.operation("soeg_bruger")
+        svar = self.k.klient.kald(
+            op.metode, op.sti, operation="soeg_bruger",
+            json={"LogonId": az.strip()}, forventede_status=(200, 204, 404),
+        )
+        traef = [t for t in self.k.endpoints.soegningstraef(svar.krop)
+                 if _logon(str(t.get("LogonId") or "")) == noegle]
+        bruger_id = _foerste(traef[0], "Id", "id") if len(traef) == 1 else None
+        self._bruger_cache[noegle] = int(bruger_id) if bruger_id else None
+        return self._bruger_cache[noegle]
+
     def _slaa_part_op(self, nummer: str, er_firma: bool) -> int:
         """CPR/CVR -> SBSYS' interne PartId. Resultatet huskes for kørslen.
 
@@ -377,3 +446,8 @@ def _foerste(krop: Any, *navne: str) -> Any:
         if krop.get(navn) is not None:
             return krop[navn]
     return None
+
+
+def _logon(vaerdi: str) -> str:
+    """``AAK\\AZ12345`` / ``az12345@aarhus.dk`` / ``az12345`` -> ``az12345``."""
+    return vaerdi.strip().split("\\")[-1].split("@")[0].casefold()

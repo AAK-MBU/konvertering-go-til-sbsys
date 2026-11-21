@@ -368,3 +368,67 @@ def test_tom_afdeling_uden_mapning_afvises_stadig():
     assert m.slaa_op("afdeling", "<tom>|ABA") == "15"
     with pytest.raises(ManglerMapping):
         m.slaa_op("afdeling", "<tom>|Psykolog")
+
+
+# --- sagsbehandleren: beskyttede PPR-sager kræver en (prod 20-11-2026) -------
+
+class BrugerKlient:
+    """Svarer på brugersøgningen. SBSYS kan søge bredere end på identen."""
+
+    def __init__(self, brugere):
+        self.brugere, self.soegninger = brugere, []
+
+    def kald(self, metode, sti, **kw):
+        assert sti.endswith("/bruger/search")
+        self.soegninger.append(kw["json"])
+        return SimpleNamespace(status=200, krop={"Results": self.brugere}, korrelations_id="k")
+
+
+def _bruger_loader(brugere, kodelister=None):
+    from konvertering.mapping import Kodelister
+
+    k = SimpleNamespace(endpoints=Endpoints(), klient=BrugerKlient(brugere),
+                        kodelister=kodelister or Kodelister({}))
+    return SagLoader(k)
+
+
+BRUGERE = [{"Id": 41, "LogonId": "AAK\\AZ12345"}, {"Id": 42, "LogonId": "az123456"}]
+
+
+def test_gos_sagsbehandler_slaas_op_paa_az_identen(monkeypatch):
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader = _bruger_loader(BRUGERE)
+    assert loader._ansvarlig({"ansvarlig_go": "az12345", "kilde_noegle": "K"}) == "41"
+    assert loader.k.klient.soegninger == [{"LogonId": "az12345"}]
+
+
+def test_kun_et_praecist_traef_taeller(monkeypatch):
+    """az12345 må ikke ramme az123456, selv om SBSYS svarer med begge."""
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader = _bruger_loader([{"Id": 42, "LogonId": "az123456"}])
+    assert loader._ansvarlig({"ansvarlig_go": "az12345", "kilde_noegle": "K"}) is None
+
+
+def test_mapningen_vinder_over_opslaget(monkeypatch):
+    from konvertering.mapping import Kodelister, Opslag
+
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader = _bruger_loader(BRUGERE, Kodelister({("bruger", "az12345"): Opslag("99", "map")}))
+    assert loader._ansvarlig({"ansvarlig_go": "az12345", "kilde_noegle": "K"}) == "99"
+    assert loader.k.klient.soegninger == []
+
+
+def test_tvungen_sagsbehandler_vinder_over_alt(monkeypatch):
+    monkeypatch.setenv("TEST_SAGSBEHANDLER_AZ", "az12345")
+    loader = _bruger_loader(BRUGERE)
+    assert loader._ansvarlig({"ansvarlig_go": "az999", "kilde_noegle": "K"}) == "41"
+    loader._ansvarlig({"ansvarlig_go": "az888", "kilde_noegle": "K2"})
+    assert len(loader.k.klient.soegninger) == 1, "opslaget huskes"
+
+
+def test_tvungen_sagsbehandler_der_ikke_findes_afviser_sagen(monkeypatch):
+    from konvertering.sbsys.errors import ValideringsFejl
+
+    monkeypatch.setenv("TEST_SAGSBEHANDLER_AZ", "az000")
+    with pytest.raises(ValideringsFejl):
+        _bruger_loader(BRUGERE)._ansvarlig({"ansvarlig_go": None, "kilde_noegle": "K"})
