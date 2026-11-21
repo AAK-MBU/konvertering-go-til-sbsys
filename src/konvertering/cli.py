@@ -736,15 +736,10 @@ def _vaerdier_saml(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"Intet skrevet. {e}", file=sys.stderr)
         return 1
-    findes = [args.ud / f"{liste}-{slags}.csv"
-              for liste in resultat for slags in ("gennemsyn", "vaerdier")
-              if (args.ud / f"{liste}-{slags}.csv").exists()]
-    if findes and not args.overskriv:
-        print("Filerne findes allerede — måske med din gennemgang i. Intet er overskrevet:",
-              file=sys.stderr)
-        for sti in findes:
-            print(f"  {sti}", file=sys.stderr)
-        print("Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
+    sti = args.ud / vaerdier.GENNEMSYN_FIL
+    if sti.exists() and not args.overskriv:
+        print(f"{sti} findes allerede — måske med din gennemgang i. Intet er overskrevet.\n"
+              f"Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
         return 1
 
     print(f"{'liste':16}{'stavemåder':>11}{'værdier':>9}{'auto':>7}{'forslag':>9}{'afklar':>8}")
@@ -752,9 +747,8 @@ def _vaerdier_saml(args: argparse.Namespace) -> int:
         status = Counter(r.status for r in raekker)
         print(f"{liste:16}{len(raekker):>11}{len(vaerdier.vaerdiliste(raekker)):>9}"
               f"{status['auto']:>7}{status['forslag']:>9}{status['afklar']:>8}")
-    for sti in vaerdier.skriv(resultat, args.ud):
-        print(f"  skrevet: {sti}")
-    print("\nGennemgå *-gennemsyn.csv: 'forslag' godkendes (ja/nej i 'godkendt'), "
+    print(f"  skrevet: {vaerdier.skriv(resultat, args.ud)}")
+    print("\nÉn fane pr. liste. 'forslag' godkendes (ja/nej i 'godkendt'), "
           "'afklar' kræver en beslutning. 'rettet_vaerdi' overskriver forslaget.")
     return 0
 

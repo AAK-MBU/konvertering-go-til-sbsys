@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import csv
-
 import pytest
 
 from konvertering import cli, vaerdier
@@ -163,14 +161,21 @@ def test_ukendt_fane_afvises():
         saml({"Noget": ["x"]})
 
 
-def test_cli_skriver_og_overskriver_ikke(tmp_path, monkeypatch):
+def test_cli_skriver_excel_og_overskriver_ikke(tmp_path, monkeypatch):
+    import openpyxl
+
     monkeypatch.setattr(vaerdier, "laes_xlsx", lambda sti: ({"Klassetrin": ["1", "2"]}, []))
     fil = tmp_path / "in.xlsx"
     fil.write_bytes(b"")
     ud = tmp_path / "ud"
     assert cli.main(["vaerdier", "saml", str(fil), "--ud", str(ud)]) == 0
-    with (ud / "klassetrin-vaerdier.csv").open(encoding="utf-8-sig") as f:
-        assert [r["foreslaaet_vaerdi"] for r in csv.DictReader(f, delimiter=";")] == ["1", "2"]
-    (ud / "klassetrin-gennemsyn.csv").write_text("min gennemgang", encoding="utf-8")
+    bog = openpyxl.load_workbook(ud / "gennemsyn.xlsx")
+    ark = bog["klassetrin"]
+    raekker = list(ark.iter_rows(values_only=True))
+    assert raekker[0][:4] == ("liste", "go_vaerdi", "go_kolonner", "foreslaaet_vaerdi")
+    assert [r[1] for r in raekker[1:]] == ["1", "2"]
+    assert ark.freeze_panes == "A2"
+
+    foer = (ud / "gennemsyn.xlsx").read_bytes()
     assert cli.main(["vaerdier", "saml", str(fil), "--ud", str(ud)]) == 1
-    assert (ud / "klassetrin-gennemsyn.csv").read_text(encoding="utf-8") == "min gennemgang"
+    assert (ud / "gennemsyn.xlsx").read_bytes() == foer

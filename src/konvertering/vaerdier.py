@@ -33,7 +33,6 @@ To fund fra GO's data (21-11-2026) styrer reglerne:
 
 from __future__ import annotations
 
-import csv
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -100,7 +99,6 @@ STATUS_ORDEN = {"auto": 0, "forslag": 1, "afklar": 2}
 
 REVIEW_KOLONNER = ["liste", "go_vaerdi", "go_kolonner", "foreslaaet_vaerdi", "lis_nr",
                    "status", "begrundelse", "godkendt", "rettet_vaerdi"]
-VAERDI_KOLONNER = ["liste", "foreslaaet_vaerdi", "lis_nr", "stavemaader", "status"]
 
 
 def ryd(raa: object) -> str:
@@ -460,20 +458,35 @@ def laes_xlsx(sti: Path) -> tuple[dict[str, list[object]], list[str]]:
         bog.close()
 
 
-def skriv(resultat: dict[str, list[Raekke]], mappe: Path) -> list[Path]:
+GENNEMSYN_FIL = "gennemsyn.xlsx"
+_BREDDER = {"liste": 14, "go_vaerdi": 45, "go_kolonner": 22, "foreslaaet_vaerdi": 45,
+            "lis_nr": 8, "status": 10, "begrundelse": 80, "godkendt": 10, "rettet_vaerdi": 40}
+
+
+def skriv(resultat: dict[str, list[Raekke]], mappe: Path) -> Path:
+    """Én Excel-fil, én fane pr. liste.
+
+    Excel frem for CSV: en CSV deles i kolonner efter Windows'
+    listeseparator, og den er komma på nogle maskiner og semikolon på
+    andre. Så stod alt i én kolonne (21-11-2026).
+    """
+    import openpyxl
+    from openpyxl.styles import Font
+
     mappe.mkdir(parents=True, exist_ok=True)
-    skrevet = []
+    bog = openpyxl.Workbook()
+    bog.remove(bog.active)
     for liste, raekker in resultat.items():
-        sti = mappe / f"{liste}-gennemsyn.csv"
-        with sti.open("w", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=REVIEW_KOLONNER, delimiter=";")
-            w.writeheader()
-            w.writerows(r.__dict__ for r in raekker)
-        skrevet.append(sti)
-        sti = mappe / f"{liste}-vaerdier.csv"
-        with sti.open("w", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=VAERDI_KOLONNER, delimiter=";")
-            w.writeheader()
-            w.writerows(vaerdiliste(raekker))
-        skrevet.append(sti)
-    return skrevet
+        ark = bog.create_sheet(liste)
+        ark.append(REVIEW_KOLONNER)
+        for r in raekker:
+            ark.append([getattr(r, k) for k in REVIEW_KOLONNER])
+        for celle in ark[1]:
+            celle.font = Font(bold=True)
+        for nr, kolonne in enumerate(REVIEW_KOLONNER, start=1):
+            ark.column_dimensions[openpyxl.utils.get_column_letter(nr)].width = _BREDDER[kolonne]
+        ark.freeze_panes = "A2"
+        ark.auto_filter.ref = ark.dimensions
+    sti = mappe / GENNEMSYN_FIL
+    bog.save(sti)
+    return sti
