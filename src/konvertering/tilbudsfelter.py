@@ -200,7 +200,7 @@ def eksterne_kandidater(v: str) -> set[str]:
     """De eksterne nøgler en GO-værdi kan svare til i en DWH-liste.
 
     Kun AZ-identen for brugere: et eksakt match på den nøgle DWH bruger
-    (Jakob, 18-11-2026). Tallene i GO's institutionsværdier ("Navn [495]")
+    (LIS, 18-11-2026). Tallene i GO's institutionsværdier ("Navn [495]")
     bruges BEVIDST IKKE: det er ikke sikkert at de svarer til listernes
     nøgler, og et forkert gæt havner lydløst i SBSYS som en gyldig værdi.
     Institutioner mappes eksplicit i mapping/tilbudsfeltvaerdi.csv.

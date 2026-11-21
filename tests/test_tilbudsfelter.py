@@ -138,7 +138,7 @@ def test_sagsbehandlerens_vaerdi_logges_aldrig():
 
 
 def test_sagsbehandler_matches_paa_ekstern_noegle():
-    """DWH-listerne: AZ-identen er nøglen (Jakob, 18-11-2026)."""
+    """DWH-listerne: AZ-identen er nøglen (LIS, 18-11-2026)."""
     klient = Klient(eksterne=[{"tilbudFeltVaerdiListeMulighedId": 608, "externalKey": "AZ12345"}])
     u = _byg("Psykolog", 1, {"Sagsbehandler": "Fornavn Efternavn (az12345)"}, klient)
     assert u.felt_vaerdier == [{"tilbudFeltId": 12, "tilbudFeltVaerdiListeMulighedId": 608}]

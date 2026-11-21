@@ -396,7 +396,7 @@ def _ord(navn: str) -> set[str]:
 
 def _om_tal_foran(foran: str, lis: str) -> str:
     if not lis:
-        return f"tal foran ({foran}): tjek mod Jakobs liste om det er LIS-nummeret"
+        return f"tal foran ({foran}): tjek mod LIS liste om det er LIS-nummeret"
     if foran == lis:
         return f"tal foran ({foran}) = LIS-nummeret"
     return f"tal foran ({foran}) er IKKE LIS-nummeret [{lis}]"

@@ -65,7 +65,7 @@ def test_alene_med_tal_foran_mister_tallet_men_beder_om_tjek():
     x = r["1443 Område Horsensvej Puljer"]
     assert x.foreslaaet_vaerdi == "Område Horsensvej Puljer"
     assert x.status == "forslag"
-    assert "tjek mod Jakobs liste" in x.begrundelse
+    assert "tjek mod LIS liste" in x.begrundelse
 
 
 def test_forskellige_tal_foran_samles_ikke():
