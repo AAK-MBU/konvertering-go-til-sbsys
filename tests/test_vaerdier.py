@@ -169,13 +169,23 @@ def test_cli_skriver_excel_og_overskriver_ikke(tmp_path, monkeypatch):
     fil.write_bytes(b"")
     ud = tmp_path / "ud"
     assert cli.main(["vaerdier", "saml", str(fil), "--ud", str(ud)]) == 0
-    bog = openpyxl.load_workbook(ud / "gennemsyn.xlsx")
+    bog = openpyxl.load_workbook(ud / "in-gennemsyn.xlsx")
     ark = bog["klassetrin"]
     raekker = list(ark.iter_rows(values_only=True))
     assert raekker[0][:4] == ("liste", "go_vaerdi", "go_kolonner", "foreslaaet_vaerdi")
     assert [r[1] for r in raekker[1:]] == ["1", "2"]
     assert ark.freeze_panes == "A2"
 
-    foer = (ud / "gennemsyn.xlsx").read_bytes()
+    foer = (ud / "in-gennemsyn.xlsx").read_bytes()
     assert cli.main(["vaerdier", "saml", str(fil), "--ud", str(ud)]) == 1
-    assert (ud / "gennemsyn.xlsx").read_bytes() == foer
+    assert (ud / "in-gennemsyn.xlsx").read_bytes() == foer
+
+
+def test_standard_er_samme_mappe_som_kilden(tmp_path, monkeypatch):
+    monkeypatch.setattr(vaerdier, "laes_xlsx", lambda sti: ({"Klassetrin": ["1"]}, []))
+    mappe = tmp_path / "OneDrive - X" / "tmp"
+    mappe.mkdir(parents=True)
+    fil = mappe / "distinkte_vaerdier.xlsx"
+    fil.write_bytes(b"")
+    assert cli.main(["vaerdier", "saml", str(fil)]) == 0
+    assert (mappe / "distinkte_vaerdier-gennemsyn.xlsx").exists()

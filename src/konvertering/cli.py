@@ -479,7 +479,8 @@ def _parser() -> argparse.ArgumentParser:
     v_saml = v_under.add_parser(
         "saml", help="Læs distinkte_vaerdier.xlsx og foreslå hvilke stavemåder der er samme værdi")
     v_saml.add_argument("fil", type=Path, help="Excel-fil med én fane pr. GO-kolonne")
-    v_saml.add_argument("--ud", type=Path, default=Path("rapporter/vaerdier"))
+    v_saml.add_argument("--ud", type=Path, default=None,
+                        help="Mappe til gennemsynet. Standard: samme mappe som Excel-filen")
     v_saml.add_argument("--overskriv", action="store_true",
                         help="Overskriv eksisterende filer — også en gennemgang du er i gang med")
 
@@ -736,7 +737,7 @@ def _vaerdier_saml(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"Intet skrevet. {e}", file=sys.stderr)
         return 1
-    sti = args.ud / vaerdier.GENNEMSYN_FIL
+    sti = vaerdier.gennemsyn_sti(args.fil, args.ud)
     if sti.exists() and not args.overskriv:
         print(f"{sti} findes allerede — måske med din gennemgang i. Intet er overskrevet.\n"
               f"Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
@@ -747,7 +748,7 @@ def _vaerdier_saml(args: argparse.Namespace) -> int:
         status = Counter(r.status for r in raekker)
         print(f"{liste:16}{len(raekker):>11}{len(vaerdier.vaerdiliste(raekker)):>9}"
               f"{status['auto']:>7}{status['forslag']:>9}{status['afklar']:>8}")
-    print(f"  skrevet: {vaerdier.skriv(resultat, args.ud)}")
+    print(f"  skrevet: {vaerdier.skriv(resultat, sti)}")
     print("\nÉn fane pr. liste. 'forslag' godkendes (ja/nej i 'godkendt'), "
           "'afklar' kræver en beslutning. 'rettet_vaerdi' overskriver forslaget.")
     return 0

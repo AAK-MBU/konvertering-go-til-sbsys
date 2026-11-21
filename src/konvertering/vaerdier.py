@@ -458,12 +458,16 @@ def laes_xlsx(sti: Path) -> tuple[dict[str, list[object]], list[str]]:
         bog.close()
 
 
-GENNEMSYN_FIL = "gennemsyn.xlsx"
+def gennemsyn_sti(kilde: Path, mappe: Path | None = None) -> Path:
+    """"distinkte_vaerdier.xlsx" -> "distinkte_vaerdier-gennemsyn.xlsx", som
+    standard i SAMME mappe som kilden."""
+    return (mappe or kilde.parent) / f"{kilde.stem}-gennemsyn.xlsx"
+
 _BREDDER = {"liste": 14, "go_vaerdi": 45, "go_kolonner": 22, "foreslaaet_vaerdi": 45,
             "lis_nr": 8, "status": 10, "begrundelse": 80, "godkendt": 10, "rettet_vaerdi": 40}
 
 
-def skriv(resultat: dict[str, list[Raekke]], mappe: Path) -> Path:
+def skriv(resultat: dict[str, list[Raekke]], sti: Path) -> Path:
     """Én Excel-fil, én fane pr. liste.
 
     Excel frem for CSV: en CSV deles i kolonner efter Windows'
@@ -473,7 +477,7 @@ def skriv(resultat: dict[str, list[Raekke]], mappe: Path) -> Path:
     import openpyxl
     from openpyxl.styles import Font
 
-    mappe.mkdir(parents=True, exist_ok=True)
+    sti.parent.mkdir(parents=True, exist_ok=True)
     bog = openpyxl.Workbook()
     bog.remove(bog.active)
     for liste, raekker in resultat.items():
@@ -487,6 +491,5 @@ def skriv(resultat: dict[str, list[Raekke]], mappe: Path) -> Path:
             ark.column_dimensions[openpyxl.utils.get_column_letter(nr)].width = _BREDDER[kolonne]
         ark.freeze_panes = "A2"
         ark.auto_filter.ref = ark.dimensions
-    sti = mappe / GENNEMSYN_FIL
     bog.save(sti)
     return sti
