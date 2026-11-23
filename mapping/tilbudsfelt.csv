@@ -1,11 +1,11 @@
 liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
 tilbudsfelt;ABA|Visiteret;ABA;Visiteret;Visiteret;map;GO-kolonne Visiteret paa ABA. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
-tilbudsfelt;ABA|Sagsbehandler;ABA;Sagsbehandler;Sagsbehandler;map;GO-kolonne Sagsbehandler paa ABA. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
+tilbudsfelt;ABA|Sagsbehandler;ABA;Sagsbehandler_;Sagsbehandler_;map;Feltet hedder 'Sagsbehandler_' i prod (set 23-11-2026). GO-kolonne Sagsbehandler paa ABA. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
 tilbudsfelt;ABA|ABAGruppe;ABA;ABA gruppe;ABA gruppe;map;GO-kolonne ABAGruppe paa ABA. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
 tilbudsfelt;ABA|Ydelse;ABA;Ydelse;Ydelse;map;GO-kolonne Ydelse paa ABA. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
 tilbudsfelt;ABA|SkoleEllerInstitution;ABA;Skole eller institution;Skole eller institution;map;GO-kolonne SkoleEllerInstitution paa ABA. DWH-liste. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
 tilbudsfelt;ABA|Betalingssted;ABA;Bevillingssted;Bevillingssted;map;GO-kolonne Betalingssted paa ABA. DWH-liste. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
-tilbudsfelt;ABA|Timer;ABA;Timer;Timer;map;GO-kolonne Timer paa ABA. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
+tilbudsfelt;ABA|Timer;ABA;Timer_;Timer_;map;Feltet hedder 'Timer_' i prod (set 23-11-2026). GO-kolonne Timer paa ABA. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
 tilbudsfelt;Dialogmøde|Visiteret;Dialogmøde;Visiteret;Visiteret;map;GO-kolonne Visiteret paa Dialogmøde. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
 tilbudsfelt;Dialogmøde|Sagsbehandler;Dialogmøde;Sagsbehandler;Sagsbehandler;map;GO-kolonne Sagsbehandler paa Dialogmøde. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
 tilbudsfelt;Dialogmøde|VisiteretTilTilbud;Dialogmøde;Status på visitation;Status på visitation;map;GO-kolonne VisiteretTilTilbud paa Dialogmøde. Fra TIL_PPR_Konverteringsark_foranstaltningsdata (17-11-2026). Gruppeforløb er udeladt indtil videre.;;
