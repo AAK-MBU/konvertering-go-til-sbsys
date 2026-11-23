@@ -51,6 +51,16 @@ from ..sbsys.errors import PermanentFejl, UdeladtMedVilje, ValideringsFejl
 from ..tilbudsfelter import Advarsel, TilbudsfeltKatalog, byg_feltvaerdier
 from .base import Loader, boelge_filter
 
+# Tom GO-værdi slås op som denne nøgle. Udslagsgivende forhold er påkrævet
+# i SBSYS' brugerflade, og GO har det ikke på PPR — så mapningen afgør hvad
+# en tom værdi bliver ("Ingen", 23-11-2026).
+TOM_UDSLAGSGIVENDE = "<tom>"
+
+
+def udslagsgivende_noegle(raekke: dict[str, Any]) -> str:
+    vaerdi = (raekke.get("udslagsgivende_go") or "").strip()
+    return vaerdi or TOM_UDSLAGSGIVENDE
+
 log = logging.getLogger(__name__)
 
 # SBSYS' egne enhedstyper. Andre værdier afvises frem for at blive gættet
@@ -105,7 +115,7 @@ class IndsatsLoader(Loader[Indsats]):
                 enhed if enhed in ENHEDSTYPER else None
             ),
             udslagsgivende_forhold=m.slaa_op(
-                "udslagsgivende_forhold", raekke.get("udslagsgivende_go"), paakraevet=False
+                "udslagsgivende_forhold", udslagsgivende_noegle(raekke), paakraevet=False
             ),
             mappetype=typen,
             go_felter=_go_felter(raekke.get("raa_json")),

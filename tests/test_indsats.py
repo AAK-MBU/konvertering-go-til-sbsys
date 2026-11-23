@@ -324,3 +324,30 @@ def test_foranstaltning_uden_tilbud_forsvinder_ikke():
     flade = _fold_katalog([{"id": 1, "navn": "P", "foranstaltninger": [{"id": 2, "navn": "F"}]}])
     assert len(flade) == 1
     assert flade[0]["tilbudId"] is None
+
+
+# --- udslagsgivende forhold (23-11-2026) -----------------------------
+
+def _med_udslagsgivende(**poster: str) -> Kodelister:
+    k = _kodelister(Psykolog="4")
+    for go, sbsys in poster.items():
+        k._poster[("udslagsgivende_forhold", go)] = Opslag(sbsys, "map")
+    return k
+
+
+def test_tom_udslagsgivende_slaas_op_som_tom():
+    """GO har intet på PPR. Mapningens <tom>-række ("Ingen") udfylder det."""
+    loader = _loader(kodelister=_med_udslagsgivende(**{"<tom>": "7"}))
+    krop = loader.payload(loader.byg(_raekke(udslagsgivende_go=None)))
+    assert krop["udslagsgivendeForholdIds"] == [7]
+
+
+def test_udslagsgivende_fra_go_vinder_over_tom():
+    loader = _loader(kodelister=_med_udslagsgivende(**{"<tom>": "7", "Vold": "3"}))
+    krop = loader.payload(loader.byg(_raekke(udslagsgivende_go="Vold")))
+    assert krop["udslagsgivendeForholdIds"] == [3]
+
+
+def test_uden_tom_raekke_sendes_intet():
+    loader = _loader(kodelister=_kodelister(Psykolog="4"))
+    assert "udslagsgivendeForholdIds" not in loader.payload(loader.byg(_raekke()))
