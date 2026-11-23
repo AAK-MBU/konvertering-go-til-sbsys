@@ -251,3 +251,21 @@ def test_ignoreret_vaerdi_giver_tomt_felt_uden_advarsel():
     katalog = TilbudsfeltKatalog(Klient(), Endpoints())
     u = byg_feltvaerdier(katalog, kodelister, "Psykolog", 1, {"Indstillingsaarsag": "PPR"})
     assert u.felt_vaerdier == [] and u.advarsler == []
+
+
+def test_go_vaerdi_matcher_mapningen_uanset_store_og_smaa_bogstaver():
+    """GO har "XXXTilflytter", arket skriver "xxxTilflytter" (set 23-11-2026)."""
+    u = _byg("Psykolog", 1, {"Indstillingsaarsag": "XXXTilflytter"})
+    assert u.felt_vaerdier == [{"tilbudFeltId": 13, "tilbudFeltVaerdiListeMulighedId": 613}]
+    assert not u.advarsler
+
+
+def test_to_mapninger_der_kun_afviger_i_store_og_smaa_bogstaver_gaettes_ikke():
+    kodelister = _kodelister()
+    kodelister._poster[("tilbudsfeltvaerdi", "Indstillingsaarsag|XxxTilflytter")] = (
+        Opslag("Følgeskab", "map"))
+    katalog = TilbudsfeltKatalog(Klient(), Endpoints())
+    u = byg_feltvaerdier(katalog, kodelister, "Psykolog", 1,
+                         {"Indstillingsaarsag": "XXXTILFLYTTER"})
+    assert u.felt_vaerdier == []
+    assert "valgmulighed" in u.advarsler[0].besked

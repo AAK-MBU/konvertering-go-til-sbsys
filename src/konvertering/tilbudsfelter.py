@@ -264,6 +264,23 @@ def byg_feltvaerdier(
     return udfald
 
 
+def _vaerdi_noegle(kodelister: Any, kolonne: str, raa: str) -> str:
+    """Nøglen i ``tilbudsfeltvaerdi`` for GO-værdien.
+
+    Eksakt stavning vinder. Ellers bruges en række der kun afviger i store
+    og små bogstaver — GO har fx "XXXAnmodningsskema", mens konverteringsarket
+    skriver "xxxAnmodningsskema" (set 23-11-2026). Kun hvis præcis én række
+    passer: to rækker der kun afviger i store/små bogstaver er en tvetydighed,
+    og så bruges den rå værdi, som giver en advarsel frem for et gæt.
+    """
+    noegle = f"{kolonne}|{raa}"
+    poster = kodelister.poster_med_praefiks(VAERDI_LISTE, f"{kolonne}|")
+    if raa in poster:
+        return noegle
+    ens = [v for v in poster if v.casefold() == raa.casefold()]
+    return f"{kolonne}|{ens[0]}" if len(ens) == 1 else noegle
+
+
 def _omsaet(katalog, kodelister, kolonne, raa, felt: Felt, advar) -> dict[str, Any] | None:
     type_ = felt.vaerdi_type.casefold()
     if type_ == "datetime":
@@ -289,7 +306,7 @@ def _omsaet(katalog, kodelister, kolonne, raa, felt: Felt, advar) -> dict[str, A
         if felt.liste_id is None:
             advar(f"'{felt.navn}' er et listefelt uden liste")
             return None
-        noegle = f"{kolonne}|{raa}"
+        noegle = _vaerdi_noegle(kodelister, kolonne, raa)
         if kodelister.er_udeladt(VAERDI_LISTE, noegle):
             # Bevidst tomt (handling = ignorer), fx Betalingssted "PPR", der
             # ikke findes i den nye opsætning. Det er en beslutning, ikke et
