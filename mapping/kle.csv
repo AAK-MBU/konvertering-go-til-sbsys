@@ -3,3 +3,4 @@ kle;17.01.05;Elevsager - optagelse;17.01.05;Optagelse i folkeskolen;map;1:1 - sa
 kle;27.24.03;Underretninger;27.24.03;Underretninger om børn og unge;map;;;
 kle;GO-LOKAL-042;Lokal emnekode uden KLE;;;bloker;Skal afklares med Arkiv - se aabne-spoergsmaal;;
 kle;17.03.84 ABA;ABA (PPR);;;ignorer;KLE og facet kommer fra PPR-skabelonen (EmneplanNummerOgFacetKanAendresFoerOprettelse = False i prod 20-11-2026). Tjek i brugerfladen at sagen faar 17.03.84.;;
+kle;17.03.04 Pædagogisk-psykologisk vurdering (PPV);Psykolog (PPR);;;ignorer;KLE og facet kommer fra PPR-skabelonen (Psykolog, id 12: EmneplanNummerOgFacetKanAendresFoerOprettelse = False i prod 20-11-2026). Tjek i brugerfladen hvilket KLE sagen faar.;;
