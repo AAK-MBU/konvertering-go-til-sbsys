@@ -428,7 +428,10 @@ def test_var_paa_kommandolinjen_vinder_over_miljoeet(monkeypatch):
 def test_udvalg_scriptet_laeser_sagen_fra_env_og_kopierer_alle_syv_tabeller():
     from pathlib import Path
     sql = Path("sql/997_udvalg_kilde.sql").read_text(encoding="utf-8")
-    assert sql.count("$(TEST_ABA_SAGS_ID)") == 3
+    # Cases, Contacts, Foranstaltningsdata, Documents, JournalNotes, GOWorkflows
+    # (DocumentSHA følger Documents). Ingen tabel oprettes tom længere.
+    assert sql.count("$(TEST_ABA_SAGS_ID)") == 6
+    assert "TOP (0)" not in sql
     for tabel in ("Cases", "Contacts", "Documents", "DocumentSHA",
                   "Foranstaltningsdata", "GOWorkflows", "JournalNotes"):
         assert f"INTO udvalg.{tabel}" in sql
