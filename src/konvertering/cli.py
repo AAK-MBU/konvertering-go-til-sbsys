@@ -783,11 +783,11 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
         muligheder, mappe / f"{stamme}-vaerdilistemuligheder.xlsx")
 
     print(f"{'liste':16}{'stavemåder':>11}{'klar':>7}{'mangler_i_sbsys':>17}"
-          f"{'ikke_tjekket':>14}{'uafklaret':>11}")
+          f"{'ikke_tjekket':>14}{'uafklaret':>11}{'ingen_tekstmatch':>18}")
     for liste in sorted({v.liste for v in valg}):
         s = Counter(v.status for v in valg if v.liste == liste)
         print(f"{liste:16}{sum(s.values()):>11}{s[vm.KLAR]:>7}{s[vm.MANGLER_I_SBSYS]:>17}"
-              f"{s[vm.IKKE_TJEKKET]:>14}{s[vm.UAFKLARET]:>11}")
+              f"{s[vm.IKKE_TJEKKET]:>14}{s[vm.UAFKLARET]:>11}{s[vm.INGEN_TEKSTMATCH]:>18}")
     print(f"\n  {len(res.tjek)} ting at tjekke, {len(konflikter)} konflikter med den nuværende mapping")
     print(f"  oversigt:      {xlsx}")
     print(f"  mappingrækker: {ud_csv} ({len(raekker)} rækker, kun 'klar')")
@@ -804,11 +804,17 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
         kolonner = vm.kolonner_for(liste)
         valgte = [r for r in raekker if r["go_vaerdi"].split("|", 1)[0] in kolonner]
         maal = SQL_MAPPE.parent / "mapping" / "tilbudsfeltvaerdi.csv"
-        erstattet, tilfoejet = vm.flet(maal, valgte)
+        # GO-værdier i listen der IKKE længere er klar: deres gamle map-række skal væk,
+        # ellers mapper konverteringen stadig til det gamle mål.
+        ikke_klar = {f"{kolonne}|{v.go_vaerdi}" for v in valg
+                     if v.liste == liste and v.status != vm.KLAR for kolonne in v.go_kolonner}
+        erstattet, tilfoejet, fjernet = vm.flet(maal, valgte, ikke_klar)
         print(f"\nFlettet {liste} ind i {maal}: {len(erstattet)} erstattet, "
-              f"{len(tilfoejet)} tilføjet")
-        for k in erstattet:
-            print(f"  erstattet: {k}")
+              f"{len(tilfoejet)} tilføjet, {len(fjernet)} fjernet")
+        for k in tilfoejet:
+            print(f"  tilføjet:  {k}")
+        for k in fjernet:
+            print(f"  fjernet:   {k}")
     return 0
 
 

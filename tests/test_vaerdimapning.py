@@ -54,9 +54,11 @@ def test_endelig_vaerdi_rettet_slaar_godkendt_og_auto(tmp_path):
 def test_kun_eksakt_navn_i_sbsys_er_klar():
     valg = [vm.Valg("bevillingssted", "mårslet skole [693]", ["Betalingssted"],
                     "Mårslet  skole [693]", "auto"),
-            vm.Valg("bevillingssted", "Svend Åge", ["Betalingssted"],
+            # GO-værdierne har id, så gennemsynets afgørelse gælder (ikke tekstreglen).
+            vm.Valg("bevillingssted", "Svend Åge [29]", ["Betalingssted"],
                     "Børnehaven Svend Åge (SDT) [29]", "godkendt"),
-            vm.Valg("bevillingssted", "Hasle skole", ["Betalingssted"], "Hasle Skole", "auto")]
+            vm.Valg("bevillingssted", "Hasle skole [600]", ["Betalingssted"], "Hasle Skole",
+                    "auto")]
     vm.byg(valg, SBSYS)
     assert (valg[0].status, valg[0].sbsys_id) == (vm.KLAR, 424)
     assert valg[1].status == vm.MANGLER_I_SBSYS
@@ -85,7 +87,8 @@ def test_tjek_finder_nummerkonflikter():
 def test_en_raekke_pr_go_kolonne_og_kun_klar():
     valg = [vm.Valg("bevillingssted", "Mårslet skole", ["Betalingssted", "Bevillingssted"],
                     "Mårslet Skole [693]", "auto"),
-            vm.Valg("bevillingssted", "Hasle skole", ["Betalingssted"], "Hasle Skole", "auto")]
+            vm.Valg("bevillingssted", "Hasle skole [600]", ["Betalingssted"], "Hasle Skole",
+                    "auto")]
     res = vm.byg(valg, SBSYS)
     raekker = vm.mapping_raekker(res, "g.xlsx", date(2026, 11, 24))
     assert [(r["go_vaerdi"], r["sbsys_vaerdi"]) for r in raekker] == [
@@ -130,7 +133,7 @@ def test_flet_erstatter_paa_plads_og_roerer_ikke_andre_linjer(tmp_path):
     foer = sti.read_text(encoding="utf-8").splitlines()
     ny = {k: "" for k in vm.MAPPING_KOLONNER} | {
         "liste": "tilbudsfeltvaerdi", "handling": "map"}
-    erstattet, tilfoejet = vm.flet(sti, [
+    erstattet, tilfoejet, _ = vm.flet(sti, [
         ny | {"go_vaerdi": "Betalingssted|65 Skovslottet (SDT)",
               "sbsys_vaerdi": "Skovslottet (SDT) [65]"},
         ny | {"go_vaerdi": "Betalingssted|Ny", "sbsys_vaerdi": "Ny [1]"}])
@@ -182,7 +185,8 @@ def test_tabellen_bygges_ens_to_gange(tmp_path):
     assert pr_vaerdi[("Bevillingssted", "Mårslet skole")]["vaerdimulighed_external_key"] == "lisid_693"
     assert pr_vaerdi[("Betalingssted", "FU VEST")]["noegletype"] == vm.KONVERTERING
     ukendt = pr_vaerdi[("Betalingssted", "Ukendt sted")]
-    assert ukendt["vaerdimulighed_navn"] == "Ukendt sted" and ukendt["status"] == vm.UAFKLARET
+    assert ukendt["vaerdimulighed_navn"] == "Ukendt sted"
+    assert ukendt["status"] == vm.INGEN_TEKSTMATCH
 
 
 def test_kommunekoder_fra_danmarks_statistik():
@@ -196,3 +200,79 @@ def test_vaerdiliste_noegler_fra_lis():
     assert vm.VAERDILISTE_NOEGLE == {
         "bevillingssted": "v_bevillingssted_ppr", "institution": "v_skole_el_institution_ppr",
         "klassetrin": "v_klassetrin", "kommune": "v_kommune"}
+
+
+# --- Tekstreglen: GO-værdier uden id ------------------------------------------
+
+PROD_BEV = [
+    {"id": 1, "vaerdiMulighed": "Mårslet Skole [693]", "aktiv": True},
+    {"id": 2, "vaerdiMulighed": "Åbyhøj dagtilbud [438]", "aktiv": True},
+    {"id": 3, "vaerdiMulighed": "Klubben Liffen [1682]", "aktiv": True},
+    {"id": 4, "vaerdiMulighed": "Møllevang dagtilbud [158]", "aktiv": True},
+    {"id": 5, "vaerdiMulighed": "Rudolf Steiner-Skolen i Aarhus [instnr 751062]", "aktiv": True},
+]
+
+
+def _v(go, endelig, kilde="rettet"):
+    return vm.Valg("bevillingssted", go, ["Betalingssted"], endelig, kilde)
+
+
+def test_tekstregel():
+    valg = [
+        _v("Mårslet  skole", None, ""),                             # b. træf, store/små
+        _v("Åbyhøj Dagtilbud", "Noget andet [1]"),                   # b. træf slår gennemsynet
+        _v("Arvepr. Carolines Børneasyl", "Arveprinsesse Carolines Børneasyl [503]"),  # c.
+        _v("Liffen", "Klubben Liffen [1682]"),                       # c. selv om navnet findes
+        _v("Tranbjerg skole", "Tranbjergskolen [725]"),              # b. uden træf: gennemsynet
+        _v("Aarhus International School S/I", None, ""),            # b. uden træf/afgørelse
+        _v("Rudolf Steiner-Skolen i Århus",
+           "Rudolf Steiner-Skolen i Aarhus [instnr 751062]"),        # a. privatskole
+        _v("158 Møllevang dagtilbud", "Møllevang dagtilbud [158]"),  # tal foran = id
+        _v("Hobitten [352}", "Hobitten [352]"),                      # id, forkert klamme
+    ]
+    vm.byg(valg, {"bevillingssted": PROD_BEV})
+    r = {v.go_vaerdi: v for v in valg}
+    assert (r["Mårslet  skole"].status, r["Mårslet  skole"].sbsys_navn) == (
+        vm.KLAR, "Mårslet Skole [693]")
+    assert r["Åbyhøj Dagtilbud"].sbsys_navn == "Åbyhøj dagtilbud [438]"
+    for go in ("Arvepr. Carolines Børneasyl", "Liffen"):
+        assert r[go].status == vm.INGEN_TEKSTMATCH and r[go].endelig is None, go
+    assert r["Tranbjerg skole"].endelig == "Tranbjergskolen [725]"
+    assert r["Aarhus International School S/I"].status == vm.UAFKLARET
+    assert r["Rudolf Steiner-Skolen i Århus"].status == vm.KLAR
+    assert r["158 Møllevang dagtilbud"].status == vm.KLAR
+    assert r["Hobitten [352}"].endelig == "Hobitten [352]"       # urørt af reglen
+
+
+def test_tekstregel_giver_konvertering_noegle_med_go_navnet():
+    valg = [_v("Arvepr. Carolines Børneasyl", "Arveprinsesse Carolines Børneasyl [503]")]
+    m = vm.vaerdilistemuligheder(vm.byg(valg, {"bevillingssted": PROD_BEV}))[0]
+    assert m["vaerdimulighed_navn"] == "Arvepr. Carolines Børneasyl"
+    assert m["vaerdimulighed_external_key"] == vm.konvertering_noegle(
+        "bevillingssted", "Arvepr. Carolines Børneasyl")
+
+
+def test_tekstregel_kraever_prod_listen():
+    v = _v("Liffen", "Klubben Liffen [1682]")
+    vm.byg([v], {})
+    assert v.endelig == "Klubben Liffen [1682]"
+
+
+def test_har_go_id():
+    assert vm.har_go_id("Hobitten [352]") and vm.har_go_id("X [instnr 281847]")
+    assert vm.har_go_id("158 Møllevang dagtilbud") and vm.har_go_id("Hobitten [400}")
+    assert not vm.har_go_id("Liffen") and not vm.har_go_id("Skole 2000")
+
+
+def test_flet_fjerner_kun_map_raekker(tmp_path):
+    sti = tmp_path / "tilbudsfeltvaerdi.csv"
+    sti.write_text(
+        "liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato\n"
+        "tilbudsfeltvaerdi;Betalingssted|Liffen;Liffen;Klubben Liffen [1682];x;map;;;\n"
+        "tilbudsfeltvaerdi;Betalingssted|PPR;PPR;;;ignorer;;;\n"
+        "tilbudsfeltvaerdi;Betalingssted|Behold;Behold;B [1];B [1];map;;;\n",
+        encoding="utf-8")
+    _, _, fjernet = vm.flet(sti, [], {"Betalingssted|Liffen", "Betalingssted|PPR"})
+    tekst = sti.read_text(encoding="utf-8")
+    assert fjernet == ["Betalingssted|Liffen"]
+    assert "Liffen" not in tekst and "Betalingssted|PPR" in tekst and "Behold" in tekst

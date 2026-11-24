@@ -50,6 +50,23 @@ KLAR = "klar"
 UAFKLARET = "uafklaret"
 MANGLER_I_SBSYS = "mangler_i_sbsys"
 IKKE_TJEKKET = "ikke_tjekket"
+INGEN_TEKSTMATCH = "ingen_tekstmatch"   # intet id i GO, ikke fundet i prod -> konvertering_
+
+# --- Tekstreglen (besluttet 24-11-2026) ---------------------------------------
+# For GO-værdier UDEN id i bevillingssted og institution stoler vi ikke på
+# gennemsynets navnegæt (fx "Arvepr. Carolines Børneasyl" -> "... [503]",
+# som viste sig forkert). I stedet:
+#   a. håndmappet til en privatskole "[instnr N]"  -> beholdes (PDF'en, 3.3)
+#   b. indeholder "dagtilbud", "skole" eller "school" -> navnet slås op i
+#      prods liste (uden "[..]", store/små og mellemrum er ligegyldige).
+#      Præcis ét træf -> det bruges. Ellers gælder gennemsynets afgørelse
+#      (fx "Tranbjerg skole" -> "Tranbjergskolen [725]").
+#   c. alt andet                                   -> konvertering_
+# Har GO-værdien et id ("[N]", "[instnr N]" eller et tal foran), gælder
+# gennemsynets afgørelse som hidtil.
+TEKSTREGEL_LISTER = frozenset({"bevillingssted", "institution"})
+_TEKSTREGEL_ORD = re.compile(r"dagtilbud|skole|school", re.IGNORECASE)
+_GO_ID = re.compile(r"\[\s*(instnr\s*)?\d+\s*[\]}]|^\s*\d+\s")
 
 
 def _norm(tekst: str) -> str:
@@ -156,8 +173,38 @@ def laes_sbsys_liste_data(krop: object) -> list[dict]:
     return [m for m in krop if isinstance(m, dict) and m.get("vaerdiMulighed")]
 
 
+def har_go_id(go_vaerdi: str) -> bool:
+    """"Navn [N]", "Navn [instnr N]" (også med "}"), eller "N Navn"."""
+    return bool(_GO_ID.search(go_vaerdi))
+
+
+def anvend_tekstregel(valg: list[Valg], sbsys: dict[str, list[dict]]) -> None:
+    """Erstat gennemsynets afgørelse for GO-værdier UDEN id (se TEKSTREGEL_LISTER).
+
+    Kun for lister hvis prod-liste er givet — uden den kan b. ikke afgøres."""
+    for liste in TEKSTREGEL_LISTER & set(sbsys):
+        pr_navn: dict[str, list[dict]] = defaultdict(list)
+        for m in sbsys[liste]:
+            if m.get("aktiv", True):
+                pr_navn[_uden_nr(m["vaerdiMulighed"])].append(m)
+        for v in valg:
+            if v.liste != liste or har_go_id(v.go_vaerdi):
+                continue
+            if v.endelig and _INSTNR.search(v.endelig):
+                continue                                         # a. privatskole
+            if _TEKSTREGEL_ORD.search(v.go_vaerdi):              # b.
+                traef = pr_navn.get(_norm(v.go_vaerdi), [])
+                if len(traef) == 1:
+                    v.endelig, v.kilde = traef[0]["vaerdiMulighed"], "tekstregel"
+                continue                                         # ellers: gennemsynet
+            v.endelig, v.kilde, v.status = None, "tekstregel", INGEN_TEKSTMATCH  # c.
+            v.bemaerkning = ("Intet id i GO og hverken 'dagtilbud', 'skole' eller "
+                             "'school' -> konvertering_")
+
+
 def byg(valg: list[Valg], sbsys: dict[str, list[dict]]) -> Resultat:
     """Tjek hver endelig værdi mod SBSYS' liste og find uoverensstemmelser."""
+    anvend_tekstregel(valg, sbsys)
     res = Resultat(valg=valg, lister_tjekket=set(sbsys))
 
     for liste, muligheder in sbsys.items():
@@ -289,7 +336,7 @@ def skriv_muligheder_xlsx(muligheder: list[dict[str, str]], sti: Path) -> Path:
         [14, 22, 45, 26, 50, 50, 13, 16, 60])
     nye: dict[tuple[str, str], dict[str, str]] = {}
     for m in muligheder:
-        if m["status"] in (MANGLER_I_SBSYS, UAFKLARET):
+        if m["status"] in (MANGLER_I_SBSYS, UAFKLARET, INGEN_TEKSTMATCH):
             nye.setdefault((m["liste"], m["vaerdimulighed_external_key"]), m)
     ark("til_lis", ["liste", "vaerdiliste_external_key", "vaerdimulighed_external_key",
                     "vaerdimulighed_navn", "noegletype", "status"],
@@ -419,7 +466,9 @@ def vaerdilistemuligheder(res: Resultat,
         kommentar = []
         if v.liste == "kommune" and type_ == KONVERTERING:
             kommentar.append("Ingen kommunekode fundet")
-        if v.status == UAFKLARET:
+        if v.status == INGEN_TEKSTMATCH:
+            kommentar.append(v.bemaerkning + ". GO-værdien bruges som navn")
+        elif v.status == UAFKLARET:
             kommentar.append("Uafklaret i gennemsynet - GO-værdien bruges som navn")
         elif v.status == MANGLER_I_SBSYS:
             kommentar.append("Findes ikke i SBSYS - LIS skal oprette den")
@@ -448,14 +497,18 @@ def kolonner_for(liste: str) -> set[str]:
     return {kolonne for kolonne, maal in MAALLISTE.items() if maal == liste}
 
 
-def flet(sti: Path, nye: list[dict[str, str]]) -> tuple[list[str], list[str]]:
+def flet(sti: Path, nye: list[dict[str, str]],
+         fjern: set[str] | frozenset[str] = frozenset()) -> tuple[list[str], list[str], list[str]]:
     """Flet rækker ind i mapping/tilbudsfeltvaerdi.csv.
 
     Linjebaseret, så alle andre rækker står præcis som før — også deres
     citationstegn og rækkefølge. En nøgle der findes i forvejen erstattes
     på sin plads; nye nøgler tilføjes til sidst.
 
-    Returnerer (erstattede nøgler, tilføjede nøgler).
+    Nøgler i ``fjern`` slettes — men kun rækker med ``handling = map``. En
+    bevidst ``ignorer``-række (fx PPR) står urørt.
+
+    Returnerer (erstattede, tilføjede, fjernede nøgler).
     """
     import io
 
@@ -468,9 +521,16 @@ def flet(sti: Path, nye: list[dict[str, str]]) -> tuple[list[str], list[str]]:
     nye_pr_noegle = {r["go_vaerdi"]: r for r in nye}
     linjer = sti.read_text(encoding="utf-8").splitlines(keepends=True)
     erstattet: list[str] = []
+    fjernet: list[str] = []
+    handling_ix = MAPPING_KOLONNER.index("handling")
     ud: list[str] = []
     for nr, tekst in enumerate(linjer):
         felter = next(csv.reader([tekst], delimiter=";"), [])
+        if nr > 0 and len(felter) > handling_ix and felter[0] == VAERDI_LISTE \
+                and felter[1].strip() in fjern and felter[1].strip() not in nye_pr_noegle \
+                and felter[handling_ix].strip() == "map":
+            fjernet.append(felter[1].strip())
+            continue
         if nr > 0 and len(felter) > 1 and felter[0] == VAERDI_LISTE \
                 and felter[1].strip() in nye_pr_noegle:
             noegle = felter[1].strip()
@@ -481,7 +541,7 @@ def flet(sti: Path, nye: list[dict[str, str]]) -> tuple[list[str], list[str]]:
     tilfoejet = [k for k in nye_pr_noegle if k not in set(erstattet)]
     ud += [linje(nye_pr_noegle[k]) for k in tilfoejet]
     sti.write_text("".join(ud), encoding="utf-8")
-    return erstattet, tilfoejet
+    return erstattet, tilfoejet, fjernet
 
 
 def konflikter_med_mapping(raekker: list[dict[str, str]], nu: dict[str, str]) -> list[dict[str, str]]:
