@@ -66,6 +66,9 @@ def test_brugerlisten_samles_pr_az(personer):
     ("Lise Sørensen", "az66666", sb.AUTO),              # "Efternavn, Fornavn" i listen
     ("MKF", "", sb.AFKLAR),                             # initialer
     ("Helt Ukendt Person", "", sb.AFKLAR),
+    ("Bo Eksempel (Inaktiv)", "az22222", sb.AUTO),         # GO's markering ignoreres
+    ("Mette Kirstine Fiktiv (fratrådt)", "az55555", sb.AUTO),
+    ("Bo Eksempel (Inaktiv) (az22222)", "az22222", sb.AUTO),
 ])
 def test_klassificering(personer, go, az, status):
     r = sb.Register(personer).klassificer(go)

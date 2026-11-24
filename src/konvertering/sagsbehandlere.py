@@ -90,8 +90,13 @@ class Raekke:
 
 
 def norm(navn: str) -> str:
-    """Til SAMMENLIGNING: små bogstaver, uden punktummer, ét mellemrum."""
-    navn = re.sub(r"[. ]", " ", navn)
+    """Til SAMMENLIGNING: små bogstaver, uden punktummer, ét mellemrum.
+
+    Tekst i parentes fjernes: GO skriver fx "Navn (Inaktiv)", og den
+    markering siger intet om hvem personen er. (AZ-identer i parentes er
+    allerede fundet inden.)"""
+    navn = re.sub(r"\([^)]*\)?", " ", navn)
+    navn = re.sub(r"[.\u00a0]", " ", navn)
     navn = re.sub(r"\s*-\s*", "-", navn)
     return re.sub(r"\s+", " ", navn).strip().casefold()
 
@@ -246,8 +251,8 @@ class Register:
         if az := find_az(go):
             if az not in self.personer:
                 return Raekke(go, "", AFKLAR, "AZ-identen i GO-værdien findes ikke i brugerlisten")
-            navn = re.sub(r"[()\[\]]", " ", _AZ.sub(" ", go.split("\\")[-1]))
-            if not re.search(r"[^\W\d_]{2}", navn):
+            navn = _AZ.sub(" ", go.split("\\")[-1])
+            if not re.search(r"[^\W\d_]{2}", norm(navn)):
                 return Raekke(go, az, AUTO, "AZ-identen står i GO-værdien")
             if self._passer(navn, az):
                 return Raekke(go, az, AUTO, "AZ-identen står i GO-værdien, og navnet passer")
