@@ -501,6 +501,19 @@ def _parser() -> argparse.ArgumentParser:
                        help="Flet listens 'klar'-rækker ind i mapping/tilbudsfeltvaerdi.csv "
                             "(eksisterende nøgler erstattes). Kan gentages")
 
+    v_sb = v_under.add_parser(
+        "sagsbehandlere", help="Rens GO's sagsbehandlere til AZ-identer mod LIS' brugerliste")
+    v_sb.add_argument("fil", type=Path,
+                      help="distinkte_vaerdier.xlsx (kun fanen Sagsbehandler læses)")
+    v_sb.add_argument("--brugerliste", type=Path, required=True,
+                      help="LIS' brugerhistorik (IDENT, NAVN, STARTDATO, SLUTDATO, AKTIV)")
+    v_sb.add_argument("--tidligere", type=Path, default=None, metavar="GENNEMSYN",
+                      help="Et tidligere sagsbehandlere-gennemsyn.xlsx: afgørelserne kopieres ind")
+    v_sb.add_argument("--ud", type=Path, default=None,
+                      help="Mappe til gennemsynet. Standard: samme mappe som fil. "
+                           "Aldrig i repoet (persondata)")
+    v_sb.add_argument("--overskriv", action="store_true")
+
     spec = under.add_parser(
         "spec", help="Læs SBSYS' egen OpenAPI-beskrivelse — stier, felter, nøglekandidater")
     spec.add_argument("hvad", choices=["stier", "noegle", "felt", "model", "soegning", "gem"],
@@ -540,6 +553,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.kommando == "vaerdier":
         if args.vaerdier_kommando == "mapning":
             return _vaerdier_mapning(args)
+        if args.vaerdier_kommando == "sagsbehandlere":
+            return _vaerdier_sagsbehandlere(args)
         return _vaerdier_saml(args)
 
     try:
@@ -842,6 +857,65 @@ def _hent_sbsys_lister(lister: list[str]) -> dict[str, object]:
     finally:
         kontekst.klient.luk()
     return ud
+
+
+def _vaerdier_sagsbehandlere(args: argparse.Namespace) -> int:
+    """Persondata: kun ANTAL i terminalen. Navnene står kun i Excel-filen."""
+    from . import sagsbehandlere as sb
+
+    for sti in (args.fil, args.brugerliste, args.tidligere):
+        if sti is not None and not sti.exists():
+            print(f"Findes ikke: {sti}", file=sys.stderr)
+            return 2
+    mappe = (args.ud or args.fil.parent).resolve()
+    repo = SQL_MAPPE.parent.resolve()
+    if mappe == repo or repo in mappe.parents:
+        print(f"Gennemsynet indeholder navne og må ikke ligge i repoet ({repo}). "
+              f"Brug --ud til en mappe udenfor.", file=sys.stderr)
+        return 2
+    ud = mappe / "sagsbehandlere-gennemsyn.xlsx"
+    if args.tidligere and args.tidligere.resolve() == ud:
+        print(f"Det nye gennemsyn ville overskrive det tidligere ({ud}).\n"
+              f"Omdøb det tidligere først (fx til ...-runde1.xlsx), eller brug --ud.",
+              file=sys.stderr)
+        return 1
+    if ud.exists() and not args.overskriv:
+        print(f"{ud} findes allerede — måske med din gennemgang i. Intet er overskrevet.\n"
+              f"Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
+        return 1
+    try:
+        personer = sb.laes_brugerliste(args.brugerliste)
+        go = sb.laes_go_sagsbehandlere(args.fil)
+    except ValueError as e:
+        print(f"Intet skrevet. {e}", file=sys.stderr)
+        return 1
+    print(f"Brugerliste: {len(personer)} personer (AZ-identer), "
+          f"{sum(p.aktiv for p in personer.values())} aktive")
+    print(f"GO: {len(go)} forskellige sagsbehandler-værdier")
+    raekker = sb.saml(go, personer)
+    forsvundne: list[str] = []
+    if args.tidligere:
+        try:
+            forsvundne = sb.overfoer(raekker, args.tidligere)
+        except ValueError as e:
+            print(f"Intet skrevet. Det tidligere gennemsyn kunne ikke læses: {e}", file=sys.stderr)
+            return 1
+    sb.skriv(raekker, personer, ud)
+
+    status, grund = sb.opsummering(raekker)
+    print(f"\n  auto {status[sb.AUTO]}   forslag {status[sb.FORSLAG]}   afklar {status[sb.AFKLAR]}")
+    for g, n in grund.most_common():
+        print(f"  {n:>6}  {g}")
+    if args.tidligere:
+        from collections import Counter
+        o = Counter(r.overfoert for r in raekker)
+        print(f"\n  Overført: {o['overført'] + o['overført, forslag ændret']}, "
+              f"tidligere uafklaret: {o['tidligere uafklaret']}, NY: {o['ny']}"
+              + (f", forsvundet fra GO: {len(forsvundne)}" if forsvundne else ""))
+    print(f"\n  skrevet: {ud}")
+    print("\n'forslag' godkendes med x i 'godkendt'. 'afklar': skriv AZ-identen i "
+          "'rettet_vaerdi'. Uafklarede får en konvertering_-nøgle.")
+    return 0
 
 
 def _vaerdier_saml(args: argparse.Namespace) -> int:
