@@ -483,6 +483,17 @@ def _parser() -> argparse.ArgumentParser:
                         help="Mappe til gennemsynet. Standard: samme mappe som Excel-filen")
     v_saml.add_argument("--overskriv", action="store_true",
                         help="Overskriv eksisterende filer — også en gennemgang du er i gang med")
+    v_map = v_under.add_parser(
+        "mapning", help="Trin 2: læs det gennemgåede gennemsyn og byg mappingrækker mod SBSYS")
+    v_map.add_argument("fil", type=Path, help="Den gennemgåede *-gennemsyn.xlsx")
+    v_map.add_argument("--sbsys", action="append", default=[], metavar="LISTE=FIL",
+                       help="SBSYS' valgmuligheder som JSON, fx "
+                            "bevillingssted=rapporter/bevillingssted-liste-prod.json. Kan gentages")
+    v_map.add_argument("--ud", type=Path, default=None,
+                       help="Mappe til resultatet. Standard: samme mappe som gennemsynet")
+    v_map.add_argument("--flet", action="append", default=[], metavar="LISTE",
+                       help="Flet listens 'klar'-rækker ind i mapping/tilbudsfeltvaerdi.csv "
+                            "(eksisterende nøgler erstattes). Kan gentages")
 
     spec = under.add_parser(
         "spec", help="Læs SBSYS' egen OpenAPI-beskrivelse — stier, felter, nøglekandidater")
@@ -521,6 +532,8 @@ def main(argv: list[str] | None = None) -> int:
         return _env_diagnose(env_status)
     # Læser kun en Excel-fil og skriver CSV — ingen database, ingen SBSYS.
     if args.kommando == "vaerdier":
+        if args.vaerdier_kommando == "mapning":
+            return _vaerdier_mapning(args)
         return _vaerdier_saml(args)
 
     try:
@@ -718,6 +731,64 @@ def _udfoer(args, settings: Settings) -> int:
     if args.kommando == "load":
         return _load(settings, args)
 
+    return 0
+
+
+def _vaerdier_mapning(args: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from . import vaerdimapning as vm
+
+    if not args.fil.exists():
+        print(f"Findes ikke: {args.fil}", file=sys.stderr)
+        return 2
+    sbsys: dict[str, list[dict]] = {}
+    for tildeling in args.sbsys:
+        liste, _, fil = tildeling.partition("=")
+        if liste not in vm.SBSYS_LISTE_ID or not fil:
+            print(f"--sbsys skal være LISTE=FIL med LISTE en af {sorted(vm.SBSYS_LISTE_ID)}",
+                  file=sys.stderr)
+            return 2
+        sbsys[liste] = vm.laes_sbsys_liste(Path(fil))
+    try:
+        valg = vm.laes_gennemsyn(args.fil)
+    except ValueError as e:
+        print(f"Intet skrevet. {e}", file=sys.stderr)
+        return 1
+    res = vm.byg(valg, sbsys)
+    raekker = vm.mapping_raekker(res, args.fil.name)
+    konflikter = vm.konflikter_med_mapping(
+        raekker, vm.eksisterende(SQL_MAPPE.parent / "mapping" / "tilbudsfeltvaerdi.csv"))
+
+    mappe = args.ud or args.fil.parent
+    stamme = args.fil.stem.removesuffix("-gennemsyn")
+    xlsx = vm.skriv_xlsx(res, konflikter, mappe / f"{stamme}-mapning.xlsx")
+    ud_csv = vm.skriv_csv(raekker, mappe / f"{stamme}-tilbudsfeltvaerdi.csv")
+
+    print(f"{'liste':16}{'stavemåder':>11}{'klar':>7}{'mangler_i_sbsys':>17}"
+          f"{'ikke_tjekket':>14}{'uafklaret':>11}")
+    for liste in sorted({v.liste for v in valg}):
+        s = Counter(v.status for v in valg if v.liste == liste)
+        print(f"{liste:16}{sum(s.values()):>11}{s[vm.KLAR]:>7}{s[vm.MANGLER_I_SBSYS]:>17}"
+              f"{s[vm.IKKE_TJEKKET]:>14}{s[vm.UAFKLARET]:>11}")
+    print(f"\n  {len(res.tjek)} ting at tjekke, {len(konflikter)} konflikter med den nuværende mapping")
+    print(f"  oversigt:      {xlsx}")
+    print(f"  mappingrækker: {ud_csv} ({len(raekker)} rækker, kun 'klar')")
+    if not sbsys:
+        print("\nIngen SBSYS-lister givet, så intet er 'klar'. Brug --sbsys LISTE=FIL.")
+    for liste in args.flet:
+        if liste not in sbsys:
+            print(f"--flet {liste}: listen er ikke tjekket mod SBSYS (mangler --sbsys "
+                  f"{liste}=FIL). Intet flettet.", file=sys.stderr)
+            return 1
+        kolonner = vm.kolonner_for(liste)
+        valgte = [r for r in raekker if r["go_vaerdi"].split("|", 1)[0] in kolonner]
+        maal = SQL_MAPPE.parent / "mapping" / "tilbudsfeltvaerdi.csv"
+        erstattet, tilfoejet = vm.flet(maal, valgte)
+        print(f"\nFlettet {liste} ind i {maal}: {len(erstattet)} erstattet, "
+              f"{len(tilfoejet)} tilføjet")
+        for k in erstattet:
+            print(f"  erstattet: {k}")
     return 0
 
 
