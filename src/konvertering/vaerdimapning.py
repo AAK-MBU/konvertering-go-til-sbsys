@@ -157,8 +157,10 @@ def laes_gennemsyn(sti: Path) -> list[Valg]:
     return ud
 
 
-# Lister ``--hent-sbsys`` henter. Institution venter til prods liste 27 er færdig.
-HENTES_AUTOMATISK = ("bevillingssted", "kommune", "klassetrin")
+# Lister ``--hent-sbsys`` henter. Institution er med, selv om prods liste 27
+# ikke er færdig: værdier der mangler dér, står som mangler_i_sbsys og bliver
+# klar ved næste kørsel, når NC har fyldt listen op.
+HENTES_AUTOMATISK = ("bevillingssted", "institution", "kommune", "klassetrin")
 
 
 def laes_sbsys_liste(sti: Path) -> list[dict]:
@@ -451,6 +453,20 @@ def mulighed_noegle(liste: str, navn: str,
     return konvertering_noegle(liste, navn), KONVERTERING
 
 
+def tabel_status(status: str) -> str:
+    """Nøgletabellens tre statusser:
+
+    klar             findes i SBSYS
+    mangler_i_sbsys  har en nøgle; LIS skal oprette den (også alle konvertering_)
+    uafklaret        kræver en afgørelse (eller listen er ikke tjekket mod SBSYS)
+    """
+    if status == KLAR:
+        return KLAR
+    if status in (MANGLER_I_SBSYS, INGEN_TEKSTMATCH):
+        return MANGLER_I_SBSYS
+    return UAFKLARET
+
+
 def vaerdilistemuligheder(res: Resultat,
                           kommunekoder: dict[str, str] | None = None) -> list[dict[str, str]]:
     """Én række pr. GO-kolonne og GO-værdi, som note 3 i konverterings-PDF'en.
@@ -472,6 +488,8 @@ def vaerdilistemuligheder(res: Resultat,
             kommentar.append("Uafklaret i gennemsynet - GO-værdien bruges som navn")
         elif v.status == MANGLER_I_SBSYS:
             kommentar.append("Findes ikke i SBSYS - LIS skal oprette den")
+        elif v.status == IKKE_TJEKKET:
+            kommentar.append("Ikke tjekket mod SBSYS' liste")
         if v.kommentar:
             kommentar.append(v.kommentar)
         for kolonne in v.go_kolonner or [""]:
@@ -483,7 +501,7 @@ def vaerdilistemuligheder(res: Resultat,
                 "vaerdimulighed_external_key": noegle,
                 "vaerdimulighed_navn": navn,
                 "noegletype": type_,
-                "status": v.status,
+                "status": tabel_status(v.status),
                 "kommentar": ". ".join(kommentar),
             })
     return ud

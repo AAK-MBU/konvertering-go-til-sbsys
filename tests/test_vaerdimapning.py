@@ -186,7 +186,7 @@ def test_tabellen_bygges_ens_to_gange(tmp_path):
     assert pr_vaerdi[("Betalingssted", "FU VEST")]["noegletype"] == vm.KONVERTERING
     ukendt = pr_vaerdi[("Betalingssted", "Ukendt sted")]
     assert ukendt["vaerdimulighed_navn"] == "Ukendt sted"
-    assert ukendt["status"] == vm.INGEN_TEKSTMATCH
+    assert ukendt["status"] == vm.MANGLER_I_SBSYS                # konvertering_: LIS opretter
 
 
 def test_kommunekoder_fra_danmarks_statistik():
@@ -276,3 +276,10 @@ def test_flet_fjerner_kun_map_raekker(tmp_path):
     tekst = sti.read_text(encoding="utf-8")
     assert fjernet == ["Betalingssted|Liffen"]
     assert "Liffen" not in tekst and "Betalingssted|PPR" in tekst and "Behold" in tekst
+
+
+def test_noegletabellen_har_kun_tre_statusser():
+    assert {vm.tabel_status(s) for s in (vm.KLAR, vm.MANGLER_I_SBSYS, vm.INGEN_TEKSTMATCH,
+                                         vm.UAFKLARET, vm.IKKE_TJEKKET)} == {
+        "klar", "mangler_i_sbsys", "uafklaret"}
+    assert vm.tabel_status(vm.INGEN_TEKSTMATCH) == "mangler_i_sbsys"
