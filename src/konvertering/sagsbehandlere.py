@@ -236,6 +236,12 @@ class Register:
                     return True
         return False
 
+    def _faelles_ord(self, navne: set[str], az: str) -> int:
+        """Største antal navne GO-værdien deler med én af personens navne."""
+        return max((len(set(n.split(" ")) & set(v.split(" ")))
+                    for n in navne for egen in self.personer[az].navne
+                    for v in varianter(egen)), default=0)
+
     def klassificer(self, go: str) -> Raekke:
         if az := find_az(go):
             if az not in self.personer:
@@ -270,6 +276,17 @@ class Register:
                           "For- og efternavn matcher én person (mellemnavn afviger)",
                           self._kandidater(fe))
         if len(fe) > 1:
+            # Flest fælles navne vinder — men kun hvis ÉN har flere end alle andre
+            # ("A B C D": den med "A X C D" (3) slår dem med kun "A D" (2)).
+            faelles = {az: self._faelles_ord(navne, az) for az in fe}
+            bedst = max(faelles.values())
+            vindere = [az for az, n in faelles.items() if n == bedst]
+            if len(vindere) == 1 and bedst > 2:
+                az = vindere[0]
+                return Raekke(go, az, FORSLAG,
+                              f"{len(fe)} personer med samme for- og efternavn; kun én deler "
+                              f"{bedst} navne", self._kandidater({az}) + [
+                                  k for k in self._kandidater(fe - {az})])
             return Raekke(go, "", AFKLAR, f"{len(fe)} personer med samme for- og efternavn",
                           self._kandidater(fe))
 

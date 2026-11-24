@@ -125,3 +125,33 @@ def test_overfoer_bevarer_afgoerelser(tmp_path):
     efter = {r["go_vaerdi"]: sb.endelig_az(r) for r in sb.laes_gennemsyn(sti)}
     assert foer == efter == {"Mette Fiktiv": "az55555", "Jens Hansen": "az44444",
                              "AZ22222": "az22222"}
+
+
+def _register(*brugere):
+    personer = {}
+    for az, navn in brugere:
+        p = personer.setdefault(az, sb.Person(az))
+        p.navne.add(navn)
+        p.seneste_navn = navn
+    return sb.Register(personer)
+
+
+def test_flest_faelles_navne_vinder_blandt_navnebroedre():
+    reg = _register(("az00001", "Ane Bodil Cirkel Dahl"),
+                    ("az00002", "Ane Xenia Cirkel Dahl"),   # 3 af 4 - den rigtige
+                    ("az00003", "Ane Dahl"),
+                    ("az00004", "Ane Yrsa Dahl"))
+    r = reg.klassificer("Ane Bodil Cirkel Dahl")
+    assert (r.foreslaaet_az, r.status) == ("az00001", sb.AUTO)           # eksakt
+    r = reg.klassificer("Ane Birte Cirkel Dahl")
+    assert (r.foreslaaet_az, r.status) == ("", sb.AFKLAR)                # to deler 3
+    reg = _register(("az00002", "Ane Xenia Cirkel Dahl"), ("az00003", "Ane Dahl"),
+                    ("az00004", "Ane Yrsa Dahl"))
+    r = reg.klassificer("Ane Birte Cirkel Dahl")
+    assert (r.foreslaaet_az, r.status) == ("az00002", sb.FORSLAG)
+    assert len(r.kandidater) == 3 and "az00002" in r.kandidater[0]
+
+
+def test_kun_for_og_efternavn_til_faelles_forbliver_afklar():
+    reg = _register(("az00003", "Ane Dahl"), ("az00004", "Ane Yrsa Dahl"))
+    assert reg.klassificer("Ane Birte Dahl").status == sb.AFKLAR
