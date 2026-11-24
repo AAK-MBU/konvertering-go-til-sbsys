@@ -25,6 +25,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
@@ -75,6 +76,8 @@ class Valg:
     endelig: str | None
     kilde: str                # rettet | godkendt | auto | ""
     kommentar: str = ""
+    forslag: str = ""         # trin 1's forslag, som det stod i filen
+    godkendt: str = ""        # kolonnen "godkendt", som den stod i filen
     sbsys_id: int | None = None
     sbsys_navn: str | None = None
     status: str = UAFKLARET
@@ -131,15 +134,23 @@ def laes_gennemsyn(sti: Path) -> list[Valg]:
                     endelig, kilde = None, ""
                 kolonner = [k.strip() for k in g(r, "go_kolonner").split(",") if k.strip()]
                 ud.append(Valg(g(r, "liste") or ark.title, go, kolonner, endelig or None,
-                               kilde, g(r, "kommentar")))
+                               kilde, g(r, "kommentar"), forslag, godkendt))
     finally:
         bog.close()
     return ud
 
 
+# Lister ``--hent-sbsys`` henter. Institution venter til prods liste 27 er færdig.
+HENTES_AUTOMATISK = ("bevillingssted", "kommune", "klassetrin")
+
+
 def laes_sbsys_liste(sti: Path) -> list[dict]:
     """En JSON-fil med SBSYS' valgmuligheder, som ``konv kald ... --ud`` gemmer den."""
-    krop = json.loads(sti.read_text(encoding="utf-8-sig"))
+    return laes_sbsys_liste_data(json.loads(sti.read_text(encoding="utf-8-sig")))
+
+
+def laes_sbsys_liste_data(krop: object) -> list[dict]:
+    """SBSYS' valgmuligheder fra et allerede indlæst JSON-svar."""
     if isinstance(krop, dict):
         krop = krop.get("Results") or krop.get("body") or []
     return [m for m in krop if isinstance(m, dict) and m.get("vaerdiMulighed")]
@@ -251,6 +262,45 @@ def skriv_csv(raekker: list[dict[str, str]], sti: Path) -> Path:
     return sti
 
 
+def skriv_muligheder_xlsx(muligheder: list[dict[str, str]], sti: Path) -> Path:
+    """Den beregnede tabel (alle rækker) + de navne LIS skal oprette (unikke)."""
+    import openpyxl
+    from openpyxl.styles import Font
+
+    bog = openpyxl.Workbook()
+    bog.remove(bog.active)
+
+    def ark(navn: str, hoved: list[str], raekker: list[list], bredder: list[int]) -> None:
+        a = bog.create_sheet(navn)
+        a.append(hoved)
+        for r in raekker:
+            a.append(r)
+        for c in a[1]:
+            c.font = Font(bold=True)
+        for i, b in enumerate(bredder, start=1):
+            a.column_dimensions[openpyxl.utils.get_column_letter(i)].width = b
+        a.freeze_panes = "A2"
+        a.auto_filter.ref = a.dimensions
+
+    hoved = ["liste", "go_feltnavn", "go_feltvaerdi", "vaerdiliste_external_key",
+             "vaerdimulighed_external_key", "vaerdimulighed_navn", "noegletype", "status",
+             "kommentar"]
+    ark("vaerdilistemuligheder", hoved, [[m[k] for k in hoved] for m in muligheder],
+        [14, 22, 45, 26, 50, 50, 13, 16, 60])
+    nye: dict[tuple[str, str], dict[str, str]] = {}
+    for m in muligheder:
+        if m["status"] in (MANGLER_I_SBSYS, UAFKLARET):
+            nye.setdefault((m["liste"], m["vaerdimulighed_external_key"]), m)
+    ark("til_lis", ["liste", "vaerdiliste_external_key", "vaerdimulighed_external_key",
+                    "vaerdimulighed_navn", "noegletype", "status"],
+        [[m["liste"], m["vaerdiliste_external_key"], m["vaerdimulighed_external_key"],
+          m["vaerdimulighed_navn"], m["noegletype"], m["status"]]
+         for _, m in sorted(nye.items())],
+        [14, 26, 50, 50, 13, 16])
+    bog.save(sti)
+    return sti
+
+
 def skriv_xlsx(res: Resultat, konflikter: list[dict[str, str]], sti: Path) -> Path:
     """Alt til gennemsyn: hver stavemåde, de endelige værdier og problemerne."""
     import openpyxl
@@ -297,6 +347,97 @@ def skriv_xlsx(res: Resultat, konflikter: list[dict[str, str]], sti: Path) -> Pa
         [14, 45, 50, 80])
     bog.save(sti)
     return sti
+
+
+# --- Værdilistemuligheder med nøgler (konverterings-PDF'en, trin 3-4) -------
+
+# Fast navnerum til konvertering_-nøgler. MÅ ALDRIG ÆNDRES: nøglerne
+# beregnes ud fra det (uuid5), så samme liste + navn altid giver samme
+# nøgle, også efter tabellen er slettet og bygget igen.
+NAVNERUM = uuid.UUID("d6e5a33e-4914-4e6a-8f9a-a9f5ca30cc0d")
+
+# VaerdiListeExternalKey pr. liste. Kun dem PDF'en nævner; resten skal LIS oplyse.
+VAERDILISTE_NOEGLE: dict[str, str] = {
+    "bevillingssted": "v_bevillingssted_ppr",
+    "institution": "v_skole_el_institution_ppr",
+    "klassetrin": "v_klassetrin",
+    "kommune": "v_kommune",
+}
+
+KOMMUNEKODER = Path(__file__).resolve().parents[2] / "mapping" / "reference" / "kommunekoder.csv"
+
+
+def laes_kommunekoder(sti: Path = KOMMUNEKODER) -> dict[str, str]:
+    """Navn (normaliseret) -> kommunekode. Kilde: Danmarks Statistik (FOLK1A,
+    OMRÅDE), hentet 24-11-2026; matcher prods liste 2 navn for navn."""
+    if not sti.exists():
+        return {}
+    with sti.open(encoding="utf-8-sig", newline="") as f:
+        return {_norm(r["navn"]): r["kode"].strip() for r in csv.DictReader(f, delimiter=";")}
+
+_INSTNR = re.compile(r"\[instnr\s*(\d+)\]\s*$", re.IGNORECASE)
+
+LISID, INSTNR, KOMMUNEKODE, KONVERTERING = "lisid", "instnr", "kommunekode", "konvertering"
+
+
+def konvertering_noegle(liste: str, navn: str) -> str:
+    """Deterministisk nøgle: samme liste + navn giver altid samme uuid.
+    Store/små bogstaver og ekstra mellemrum tæller ikke."""
+    return f"konvertering_{uuid.uuid5(NAVNERUM, f'{liste}|{_norm(navn)}')}"
+
+
+def mulighed_noegle(liste: str, navn: str,
+                    kommunekoder: dict[str, str] | None = None) -> tuple[str, str]:
+    """(VaerdiMulighedExternalKey, nøgletype) for et endeligt navn.
+
+    "Navn [N]" -> lisid_N; "Navn [instnr N]" -> instreg_instnr_N;
+    kommune -> kommunekoden (tom hvis ukendt); alt andet -> konvertering_<uuid5>.
+    """
+    if m := _INSTNR.search(navn):
+        return f"instreg_instnr_{m.group(1)}", INSTNR
+    if nr := lis_nr(navn):
+        return f"lisid_{nr}", LISID
+    if liste == "kommune":
+        kode = (kommunekoder or {}).get(_norm(navn))
+        if kode:
+            return kode, KOMMUNEKODE
+    return konvertering_noegle(liste, navn), KONVERTERING
+
+
+def vaerdilistemuligheder(res: Resultat,
+                          kommunekoder: dict[str, str] | None = None) -> list[dict[str, str]]:
+    """Én række pr. GO-kolonne og GO-værdi, som note 3 i konverterings-PDF'en.
+
+    Er værdien uafklaret i gennemsynet, bruges GO-værdien selv som navn
+    (som "Markblomsten" i PDF'en)."""
+    ud = []
+    if kommunekoder is None:
+        kommunekoder = laes_kommunekoder()
+    for v in sorted(res.valg, key=lambda v: (v.liste, v.go_vaerdi.casefold())):
+        navn = v.sbsys_navn or v.endelig or v.go_vaerdi
+        noegle, type_ = mulighed_noegle(v.liste, navn, kommunekoder)
+        kommentar = []
+        if v.liste == "kommune" and type_ == KONVERTERING:
+            kommentar.append("Ingen kommunekode fundet")
+        if v.status == UAFKLARET:
+            kommentar.append("Uafklaret i gennemsynet - GO-værdien bruges som navn")
+        elif v.status == MANGLER_I_SBSYS:
+            kommentar.append("Findes ikke i SBSYS - LIS skal oprette den")
+        if v.kommentar:
+            kommentar.append(v.kommentar)
+        for kolonne in v.go_kolonner or [""]:
+            ud.append({
+                "liste": v.liste,
+                "go_feltnavn": kolonne,
+                "go_feltvaerdi": v.go_vaerdi,
+                "vaerdiliste_external_key": VAERDILISTE_NOEGLE.get(v.liste, ""),
+                "vaerdimulighed_external_key": noegle,
+                "vaerdimulighed_navn": navn,
+                "noegletype": type_,
+                "status": v.status,
+                "kommentar": ". ".join(kommentar),
+            })
+    return ud
 
 
 def kolonner_for(liste: str) -> set[str]:

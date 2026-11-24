@@ -98,7 +98,14 @@ STAVEFEJL_GRAENSE = 0.80
 STATUS_ORDEN = {"auto": 0, "forslag": 1, "afklar": 2}
 
 REVIEW_KOLONNER = ["liste", "go_vaerdi", "go_kolonner", "foreslaaet_vaerdi", "lis_nr",
-                   "status", "begrundelse", "godkendt", "rettet_vaerdi"]
+                   "status", "overfoert", "begrundelse", "godkendt", "rettet_vaerdi",
+                   "kommentar"]
+
+# Kolonnen "overfoert": hvad --tidligere gjorde med rækken.
+NY = "ny"                                  # ikke i det tidligere gennemsyn: SKAL gennemgås
+OVERFOERT = "overført"                     # din tidligere afgørelse er kopieret ind
+OVERFOERT_AENDRET = "overført, forslag ændret"  # afgørelsen står nu i rettet_vaerdi
+TIDLIGERE_UAFKLARET = "tidligere uafklaret"     # var med før, men ikke afgjort
 
 
 def ryd(raa: object) -> str:
@@ -164,6 +171,8 @@ class Raekke:
     begrundelse: str
     godkendt: str = ""
     rettet_vaerdi: str = ""
+    kommentar: str = ""
+    overfoert: str = ""
 
 
 def saml(vaerdier: dict[str, list[object]]) -> dict[str, list[Raekke]]:
@@ -464,7 +473,51 @@ def gennemsyn_sti(kilde: Path, mappe: Path | None = None) -> Path:
     return (mappe or kilde.parent) / f"{kilde.stem}-gennemsyn.xlsx"
 
 _BREDDER = {"liste": 14, "go_vaerdi": 45, "go_kolonner": 22, "foreslaaet_vaerdi": 45,
-            "lis_nr": 8, "status": 10, "begrundelse": 80, "godkendt": 10, "rettet_vaerdi": 40}
+            "lis_nr": 8, "status": 10, "overfoert": 22, "begrundelse": 80, "godkendt": 10,
+            "rettet_vaerdi": 40, "kommentar": 40}
+
+
+def overfoer(resultat: dict[str, list[Raekke]], tidligere: Path) -> list[tuple[str, str]]:
+    """Kopiér afgørelserne fra et tidligere gennemsyn ind i et nyt.
+
+    Matcher på (liste, GO-værdi) — præcis den stavemåde GO har. Det er
+    UDFALDET der bevares, ikke kryds-feltet: står forslaget anderledes nu
+    (fordi nye stavemåder har ændret grupperingen), skrives den tidligere
+    endelige værdi i ``rettet_vaerdi``, så et gammelt "x" aldrig kommer
+    til at godkende et nyt forslag.
+
+    Returnerer de (liste, GO-værdi) der stod i det tidligere gennemsyn,
+    men ikke findes i det nye udtræk.
+    """
+    from .vaerdimapning import _NEJ, laes_gennemsyn
+
+    gamle = {(v.liste, v.go_vaerdi): v for v in laes_gennemsyn(tidligere)}
+    set_nu: set[tuple[str, str]] = set()
+    for liste, raekker in resultat.items():
+        for r in raekker:
+            noegle = (liste, r.go_vaerdi)
+            set_nu.add(noegle)
+            gammel = gamle.get(noegle)
+            if gammel is None:
+                r.overfoert = NY
+                continue
+            r.kommentar = gammel.kommentar
+            if not gammel.endelig:
+                r.overfoert = TIDLIGERE_UAFKLARET
+                # Et "nej" uden rettelse gælder kun det forslag det blev givet til.
+                if gammel.forslag == r.foreslaaet_vaerdi:
+                    r.godkendt = gammel.godkendt
+                continue
+            if gammel.kilde == "rettet":
+                r.rettet_vaerdi, r.overfoert = gammel.endelig, OVERFOERT
+            elif gammel.endelig == r.foreslaaet_vaerdi:
+                r.overfoert = OVERFOERT
+                if r.status != "auto" or gammel.godkendt:
+                    nej = gammel.godkendt.casefold() in _NEJ
+                    r.godkendt = gammel.godkendt if gammel.godkendt and not nej else "x"
+            else:
+                r.rettet_vaerdi, r.overfoert = gammel.endelig, OVERFOERT_AENDRET
+    return sorted(set(gamle) - set_nu)
 
 
 def skriv(resultat: dict[str, list[Raekke]], sti: Path) -> Path:

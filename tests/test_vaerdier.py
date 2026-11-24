@@ -189,3 +189,91 @@ def test_standard_er_samme_mappe_som_kilden(tmp_path, monkeypatch):
     fil.write_bytes(b"")
     assert cli.main(["vaerdier", "saml", str(fil)]) == 0
     assert (mappe / "distinkte_vaerdier-gennemsyn.xlsx").exists()
+
+
+# --- --tidligere: overfør afgørelser fra et tidligere gennemsyn ---------------
+
+def _udfyld(sti, afgoerelser):
+    """Simulér et menneskes gennemgang: {go_vaerdi: (godkendt, rettet, kommentar)}."""
+    import openpyxl
+
+    bog = openpyxl.load_workbook(sti)
+    for ark in bog.worksheets:
+        hoved = [c.value for c in ark[1]]
+        for raekke in ark.iter_rows(min_row=2):
+            go = raekke[hoved.index("go_vaerdi")].value
+            if go in afgoerelser:
+                godkendt, rettet, kommentar = afgoerelser[go]
+                raekke[hoved.index("godkendt")].value = godkendt
+                raekke[hoved.index("rettet_vaerdi")].value = rettet
+                raekke[hoved.index("kommentar")].value = kommentar
+    bog.save(sti)
+
+
+def _endelige(sti):
+    from konvertering.vaerdimapning import laes_gennemsyn
+
+    return {(v.liste, v.go_vaerdi): v.endelig for v in laes_gennemsyn(sti)}
+
+
+def test_afgoerelser_overlever_en_ny_runde(tmp_path):
+    gamle_vaerdier = {"Betalingssted": ["Mårslet skole", "Mårslet Skole [693]", "FU VEST",
+                                        "Hasle skole", "Ukendt sted"]}
+    runde1 = vaerdier.skriv(saml(gamle_vaerdier), tmp_path / "runde1.xlsx")
+    _udfyld(runde1, {"FU VEST": (None, "FU VEST [9]", "spurgt PPR"),
+                     "Mårslet skole": ("x", None, None),
+                     "Hasle skole": ("x", None, None)})
+    foer = _endelige(runde1)
+
+    # Ny eksport: samme værdier + én ny. Hasle får nu et nummer, så forslaget ændres.
+    nye_vaerdier = {"Betalingssted": [*gamle_vaerdier["Betalingssted"], "Hasle Skole [672]",
+                                      "Helt ny institution"]}
+    resultat = saml(nye_vaerdier)
+    forsvundne = vaerdier.overfoer(resultat, runde1)
+    runde2 = vaerdier.skriv(resultat, tmp_path / "runde2.xlsx")
+    efter = _endelige(runde2)
+
+    assert forsvundne == []
+    # Alt der var afgjort før, har samme endelige værdi nu.
+    for noegle, endelig in foer.items():
+        if endelig:
+            assert efter[noegle] == endelig, noegle
+    rk = {r.go_vaerdi: r for r in resultat["bevillingssted"]}
+    assert rk["Helt ny institution"].overfoert == vaerdier.NY
+    assert rk["Ukendt sted"].overfoert in (vaerdier.TIDLIGERE_UAFKLARET, vaerdier.OVERFOERT)
+    assert rk["FU VEST"].overfoert == vaerdier.OVERFOERT
+    assert rk["FU VEST"].kommentar == "spurgt PPR"
+    assert rk["Hasle skole"].overfoert == vaerdier.OVERFOERT_AENDRET
+    assert rk["Hasle skole"].rettet_vaerdi == foer[("bevillingssted", "Hasle skole")]
+
+
+def test_gammelt_kryds_godkender_ikke_et_nyt_forslag(tmp_path):
+    runde1 = vaerdier.skriv(saml({"Betalingssted": ["Hasle skole"]}), tmp_path / "r1.xlsx")
+    _udfyld(runde1, {"Hasle skole": ("x", None, None)})
+    resultat = saml({"Betalingssted": ["Hasle skole", "Hasle Skole [672]"]})
+    vaerdier.overfoer(resultat, runde1)
+    hasle = next(r for r in resultat["bevillingssted"] if r.go_vaerdi == "Hasle skole")
+    assert hasle.foreslaaet_vaerdi != "Hasle skole"
+    assert hasle.godkendt == "" and hasle.rettet_vaerdi == "Hasle skole"
+
+
+def test_forsvundne_vaerdier_rapporteres(tmp_path):
+    runde1 = vaerdier.skriv(saml({"Betalingssted": ["A", "B"]}), tmp_path / "r1.xlsx")
+    assert vaerdier.overfoer(saml({"Betalingssted": ["A"]}), runde1) == [("bevillingssted", "B")]
+
+
+def test_cli_naegter_at_overskrive_det_tidligere_gennemsyn(tmp_path):
+    import openpyxl
+
+    kilde = tmp_path / "dv.xlsx"
+    bog = openpyxl.Workbook()
+    bog.active.title = "Betalingssted"
+    bog.active.append(["Betalingssted"])
+    bog.active.append(["A"])
+    bog.save(kilde)
+    assert cli.main(["vaerdier", "saml", str(kilde)]) == 0
+    tidligere = tmp_path / "dv-gennemsyn.xlsx"
+    foer = tidligere.read_bytes()
+    assert cli.main(["vaerdier", "saml", str(kilde), "--tidligere", str(tidligere),
+                     "--overskriv"]) == 1
+    assert tidligere.read_bytes() == foer

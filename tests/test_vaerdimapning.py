@@ -144,3 +144,55 @@ def test_flet_erstatter_paa_plads_og_roerer_ikke_andre_linjer(tmp_path):
 
 def test_kolonner_for_bevillingssted():
     assert vm.kolonner_for("bevillingssted") == {"Betalingssted", "Bevillingssted"}
+
+
+def test_noegletyper_som_i_konverterings_pdfen():
+    assert vm.mulighed_noegle("institution", "Hobitten [352]") == ("lisid_352", vm.LISID)
+    assert vm.mulighed_noegle("institution", "Leonardoskolen Aarhus [instnr 281847]") == (
+        "instreg_instnr_281847", vm.INSTNR)
+    assert vm.mulighed_noegle("kommune", "Odense", {"odense": "461"}) == ("461", vm.KOMMUNEKODE)
+    noegle, type_ = vm.mulighed_noegle("institution", "Markblomsten")
+    assert type_ == vm.KONVERTERING and noegle.startswith("konvertering_")
+
+
+def test_konvertering_noegle_er_den_samme_hver_gang():
+    # Fast værdi: ændrer den sig, er alle tidligere genererede nøgler ugyldige.
+    assert vm.konvertering_noegle("institution", "Markblomsten") == \
+        "konvertering_" + str(__import__("uuid").uuid5(
+            vm.NAVNERUM, "institution|markblomsten"))
+    assert vm.konvertering_noegle("institution", " markblomsten ") == \
+        vm.konvertering_noegle("institution", "Markblomsten")
+    assert vm.konvertering_noegle("kommune", "Markblomsten") != \
+        vm.konvertering_noegle("institution", "Markblomsten")
+    assert str(vm.NAVNERUM) == "d6e5a33e-4914-4e6a-8f9a-a9f5ca30cc0d"
+
+
+def test_tabellen_bygges_ens_to_gange(tmp_path):
+    g = _gennemsyn(tmp_path / "g.xlsx", [
+        _r("Mårslet skole", "Mårslet Skole [693]", "auto", kolonner="Betalingssted, Bevillingssted"),
+        _r("FU VEST", "FU VEST", "auto"),
+        _r("Ukendt sted", "?", "afklar")])
+
+    def koer():
+        return vm.vaerdilistemuligheder(vm.byg(vm.laes_gennemsyn(g), SBSYS))
+
+    foerste, anden = koer(), koer()
+    assert foerste == anden
+    pr_vaerdi = {(m["go_feltnavn"], m["go_feltvaerdi"]): m for m in foerste}
+    assert pr_vaerdi[("Bevillingssted", "Mårslet skole")]["vaerdimulighed_external_key"] == "lisid_693"
+    assert pr_vaerdi[("Betalingssted", "FU VEST")]["noegletype"] == vm.KONVERTERING
+    ukendt = pr_vaerdi[("Betalingssted", "Ukendt sted")]
+    assert ukendt["vaerdimulighed_navn"] == "Ukendt sted" and ukendt["status"] == vm.UAFKLARET
+
+
+def test_kommunekoder_fra_danmarks_statistik():
+    koder = vm.laes_kommunekoder()
+    assert len(koder) == 99
+    assert koder["aarhus"] == "751" and koder["odense"] == "461" and koder["københavn"] == "101"
+    assert vm.mulighed_noegle("kommune", "Aarhus", koder) == ("751", vm.KOMMUNEKODE)
+
+
+def test_vaerdiliste_noegler_fra_lis():
+    assert vm.VAERDILISTE_NOEGLE == {
+        "bevillingssted": "v_bevillingssted_ppr", "institution": "v_skole_el_institution_ppr",
+        "klassetrin": "v_klassetrin", "kommune": "v_kommune"}

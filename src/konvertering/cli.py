@@ -481,6 +481,9 @@ def _parser() -> argparse.ArgumentParser:
     v_saml.add_argument("fil", type=Path, help="Excel-fil med én fane pr. GO-kolonne")
     v_saml.add_argument("--ud", type=Path, default=None,
                         help="Mappe til gennemsynet. Standard: samme mappe som Excel-filen")
+    v_saml.add_argument("--tidligere", type=Path, default=None, metavar="GENNEMSYN",
+                        help="Et tidligere gennemgået *-gennemsyn.xlsx: dine afgørelser "
+                             "kopieres ind, så kun nye GO-værdier skal gennemgås")
     v_saml.add_argument("--overskriv", action="store_true",
                         help="Overskriv eksisterende filer — også en gennemgang du er i gang med")
     v_map = v_under.add_parser(
@@ -489,6 +492,9 @@ def _parser() -> argparse.ArgumentParser:
     v_map.add_argument("--sbsys", action="append", default=[], metavar="LISTE=FIL",
                        help="SBSYS' valgmuligheder som JSON, fx "
                             "bevillingssted=rapporter/bevillingssted-liste-prod.json. Kan gentages")
+    v_map.add_argument("--hent-sbsys", action="store_true",
+                       help="Hent SBSYS' valglister (bevillingssted, kommune, klassetrin) "
+                            "direkte fra BU-API'et med GET i stedet for --sbsys-filer")
     v_map.add_argument("--ud", type=Path, default=None,
                        help="Mappe til resultatet. Standard: samme mappe som gennemsynet")
     v_map.add_argument("--flet", action="append", default=[], metavar="LISTE",
@@ -750,6 +756,14 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
                   file=sys.stderr)
             return 2
         sbsys[liste] = vm.laes_sbsys_liste(Path(fil))
+    if args.hent_sbsys:
+        try:
+            hentet = _hent_sbsys_lister([liste for liste in vm.HENTES_AUTOMATISK
+                                         if liste not in sbsys])
+        except (KonfigurationsFejl, KonverteringsFejl, RuntimeError) as e:
+            print(f"Kunne ikke hente SBSYS' lister: {e}", file=sys.stderr)
+            return 2
+        sbsys |= {liste: vm.laes_sbsys_liste_data(data) for liste, data in hentet.items()}
     try:
         valg = vm.laes_gennemsyn(args.fil)
     except ValueError as e:
@@ -764,6 +778,9 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
     stamme = args.fil.stem.removesuffix("-gennemsyn")
     xlsx = vm.skriv_xlsx(res, konflikter, mappe / f"{stamme}-mapning.xlsx")
     ud_csv = vm.skriv_csv(raekker, mappe / f"{stamme}-tilbudsfeltvaerdi.csv")
+    muligheder = vm.vaerdilistemuligheder(res)
+    ud_muligheder = vm.skriv_muligheder_xlsx(
+        muligheder, mappe / f"{stamme}-vaerdilistemuligheder.xlsx")
 
     print(f"{'liste':16}{'stavemåder':>11}{'klar':>7}{'mangler_i_sbsys':>17}"
           f"{'ikke_tjekket':>14}{'uafklaret':>11}")
@@ -774,6 +791,9 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
     print(f"\n  {len(res.tjek)} ting at tjekke, {len(konflikter)} konflikter med den nuværende mapping")
     print(f"  oversigt:      {xlsx}")
     print(f"  mappingrækker: {ud_csv} ({len(raekker)} rækker, kun 'klar')")
+    typer = Counter(m["noegletype"] for m in muligheder)
+    print(f"  nøgletabel:    {ud_muligheder} ({len(muligheder)} rækker: "
+          + ", ".join(f"{k} {n}" for k, n in sorted(typer.items())) + ")")
     if not sbsys:
         print("\nIngen SBSYS-lister givet, så intet er 'klar'. Brug --sbsys LISTE=FIL.")
     for liste in args.flet:
@@ -790,6 +810,32 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
         for k in erstattet:
             print(f"  erstattet: {k}")
     return 0
+
+
+def _hent_sbsys_lister(lister: list[str]) -> dict[str, object]:
+    """GET af SBSYS' valgmuligheder for hver liste via BU-API'et. Kun læsning."""
+    from . import vaerdimapning as vm
+
+    settings = Settings.fra_environment()
+    sbsys = settings.sbsys
+    if not sbsys.bu_base_url:
+        raise RuntimeError("SBSYS_BU_BASE_URL er ikke sat i .env")
+    sbsys = replace(sbsys, base_url=sbsys.bu_base_url)
+    print(f"Henter valglister fra {sbsys.base_url}")
+    kontekst = byg_kontekst(replace(settings, sbsys=sbsys))
+    ud: dict[str, object] = {}
+    try:
+        for liste in lister:
+            nr = vm.SBSYS_LISTE_ID[liste]
+            svar = kontekst.klient.kald(
+                "GET", f"/bu_api/tilbudfeltvaerdiliste/{nr}/tilbudfeltvaerdilistemulighed",
+                operation="vaerdier_mapning", forventede_status=(200,))
+            ud[liste] = svar.krop
+            antal = len(svar.krop) if isinstance(svar.krop, list) else "?"
+            print(f"  {liste:15} liste {nr:>3}: {antal} valgmuligheder")
+    finally:
+        kontekst.klient.luk()
+    return ud
 
 
 def _vaerdier_saml(args: argparse.Namespace) -> int:
@@ -809,10 +855,26 @@ def _vaerdier_saml(args: argparse.Namespace) -> int:
         print(f"Intet skrevet. {e}", file=sys.stderr)
         return 1
     sti = vaerdier.gennemsyn_sti(args.fil, args.ud)
+    if args.tidligere and not args.tidligere.exists():
+        print(f"Findes ikke: {args.tidligere}", file=sys.stderr)
+        return 2
+    if args.tidligere and args.tidligere.resolve() == sti.resolve():
+        print(f"Det nye gennemsyn ville overskrive det tidligere ({sti}) — dine afgørelser.\n"
+              f"Omdøb det tidligere først (fx til ...-gennemsyn-runde1.xlsx), eller brug --ud.",
+              file=sys.stderr)
+        return 1
     if sti.exists() and not args.overskriv:
         print(f"{sti} findes allerede — måske med din gennemgang i. Intet er overskrevet.\n"
               f"Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
         return 1
+
+    forsvundne: list[tuple[str, str]] = []
+    if args.tidligere:
+        try:
+            forsvundne = vaerdier.overfoer(resultat, args.tidligere)
+        except ValueError as e:
+            print(f"Intet skrevet. Det tidligere gennemsyn kunne ikke læses: {e}", file=sys.stderr)
+            return 1
 
     print(f"{'liste':16}{'stavemåder':>11}{'værdier':>9}{'auto':>7}{'forslag':>9}{'afklar':>8}")
     for liste, raekker in resultat.items():
@@ -820,6 +882,18 @@ def _vaerdier_saml(args: argparse.Namespace) -> int:
         print(f"{liste:16}{len(raekker):>11}{len(vaerdier.vaerdiliste(raekker)):>9}"
               f"{status['auto']:>7}{status['forslag']:>9}{status['afklar']:>8}")
     print(f"  skrevet: {vaerdier.skriv(resultat, sti)}")
+    if args.tidligere:
+        alle = [r for rs in resultat.values() for r in rs]
+        o = Counter(r.overfoert for r in alle)
+        print(f"\nOverført fra {args.tidligere.name}:")
+        print(f"  {o[vaerdier.OVERFOERT]:>5}  overført - din afgørelse er kopieret ind")
+        print(f"  {o[vaerdier.OVERFOERT_AENDRET]:>5}  overført, forslag ændret - "
+              f"afgørelsen står i rettet_vaerdi")
+        print(f"  {o[vaerdier.TIDLIGERE_UAFKLARET]:>5}  tidligere uafklaret - stadig ikke afgjort")
+        print(f"  {o[vaerdier.NY]:>5}  NY - skal gennemgås (filtrér kolonnen 'overfoert' på 'ny')")
+        if forsvundne:
+            print(f"  {len(forsvundne):>5}  stod i det tidligere gennemsyn, men ikke i det nye "
+                  f"udtræk (ingen handling)")
     print("\nÉn fane pr. liste. 'forslag' godkendes (ja/nej i 'godkendt'), "
           "'afklar' kræver en beslutning. 'rettet_vaerdi' overskriver forslaget.")
     return 0
