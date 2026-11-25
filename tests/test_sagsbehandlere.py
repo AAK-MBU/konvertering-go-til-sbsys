@@ -158,3 +158,15 @@ def test_flest_faelles_navne_vinder_blandt_navnebroedre():
 def test_kun_for_og_efternavn_til_faelles_forbliver_afklar():
     reg = _register(("az00003", "Ane Dahl"), ("az00004", "Ane Yrsa Dahl"))
     assert reg.klassificer("Ane Birte Dahl").status == sb.AFKLAR
+
+
+@pytest.mark.parametrize("go, tekst", [
+    ("Ane Bodil Holm (az00001)", "fornavn passer, efternavn afviger, 2 af 3 navne fælles"),
+    ("Ane Holm (az00001)", "kun fornavnet passer"),
+    ("Kaj Bodil Dahl (az00001)", "efternavn passer, fornavn afviger, 2 af 3 navne fælles"),
+    ("Kaj Kælenavn (az00001)", "intet navn til fælles"),
+])
+def test_navneafvigelse_i_begrundelsen(go, tekst):
+    r = _register(("az00001", "Ane Bodil Dahl")).klassificer(go)
+    assert r.status == sb.FORSLAG and r.foreslaaet_az == "az00001"
+    assert r.begrundelse.split(": ", 1)[1].startswith(tekst), r.begrundelse

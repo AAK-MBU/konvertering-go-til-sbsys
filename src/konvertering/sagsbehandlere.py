@@ -241,6 +241,29 @@ class Register:
                     return True
         return False
 
+    def _navneafvigelse(self, navn: str, az: str) -> str:
+        """Hvor meget af GO-navnet går igen hos AZ-personen? Til begrundelsen,
+        så fx navneskift kan sorteres ud og godkendes samlet."""
+        bedst = (-1, False, False, 0)
+        for n in varianter(navn):
+            go_ord = n.split(" ")
+            for v in (v for egen in self.personer[az].navne for v in varianter(egen)):
+                ord_ = v.split(" ")
+                kand = (len(set(go_ord) & set(ord_)), go_ord[0] == ord_[0],
+                        len(go_ord) > 1 and go_ord[-1] == ord_[-1], len(go_ord))
+                bedst = max(bedst, kand)
+        faelles, fornavn, efternavn, antal = bedst
+        if faelles <= 0:
+            return "intet navn til fælles"
+        if fornavn and not efternavn and faelles >= 2:
+            return f"fornavn passer, efternavn afviger, {faelles} af {antal} navne fælles " \
+                   "(navneskift?)"
+        if fornavn and not efternavn:
+            return "kun fornavnet passer"
+        if efternavn and not fornavn:
+            return f"efternavn passer, fornavn afviger, {faelles} af {antal} navne fælles"
+        return f"{faelles} af {antal} navne fælles"
+
     def _faelles_ord(self, navne: set[str], az: str) -> int:
         """Største antal navne GO-værdien deler med én af personens navne."""
         return max((len(set(n.split(" ")) & set(v.split(" ")))
@@ -261,7 +284,8 @@ class Register:
                 return Raekke(go, az, AFKLAR, "Navnet passer til en ANDEN person end "
                               "AZ-identen (tastefejl i AZ?)", self._kandidater({az} | andre))
             return Raekke(go, az, FORSLAG, "AZ-identen står i GO-værdien, men navnet passer "
-                          "ikke til den person", self._kandidater({az}))
+                          f"ikke til den person: {self._navneafvigelse(navn, az)}",
+                          self._kandidater({az}))
 
         navne = varianter(go)
         if not navne or (" " not in next(iter(navne)) and len(next(iter(navne))) <= 4):
