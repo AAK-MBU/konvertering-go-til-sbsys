@@ -915,7 +915,7 @@ def _vaerdier_sagsbehandlere(args: argparse.Namespace) -> int:
               + (f", forsvundet fra GO: {len(forsvundne)}" if forsvundne else ""))
     print(f"\n  skrevet: {ud}")
     print("\n'forslag' godkendes med x i 'godkendt'. 'afklar': skriv AZ-identen i "
-          "'rettet_vaerdi'. Uafklarede får en konvertering_-nøgle.")
+          f"'rettet_vaerdi'. Resten bliver '{sb.UKENDT_BRUGER}'.")
     return 0
 
 
