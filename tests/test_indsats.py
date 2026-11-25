@@ -351,3 +351,25 @@ def test_udslagsgivende_fra_go_vinder_over_tom():
 def test_uden_tom_raekke_sendes_intet():
     loader = _loader(kodelister=_kodelister(Psykolog="4"))
     assert "udslagsgivendeForholdIds" not in loader.payload(loader.byg(_raekke()))
+
+
+def test_indsatser_hentes_sag_for_sag_i_kronologisk_orden():
+    """PPR 25-11-2026: kronologisk i SBSYS. Viewets raekkefoelge er
+    sag|Fra|Til|Visiteret|kilde_noegle, og loaderen sideopdeler på den."""
+    kald: dict[str, Any] = {}
+
+    class Db:
+        def hent_i_sider(self, kilde: str, *filtre: str, **kw: Any) -> list:
+            kald.update(kw)
+            return []
+
+    list(_loader(db=Db(), boelge=None).hent_arbejde())
+    assert kald["noeglekolonne"] == "raekkefoelge"
+
+    from pathlib import Path
+    sql = (Path(__file__).resolve().parents[1] / "sql" / "030_stg_schema.sql").read_text("utf-8")
+    view = sql.split("VIEW stg.v_indsatser_til_indlaesning")[1].split("\nGO")[0]
+    dele = ["i.sag_noegle", "ISNULL(i.periode_start, '99991231')",
+            "ISNULL(i.periode_slut,  '99991231')", "'$.Visiteret'", "'|' + i.kilde_noegle"]
+    placering = [view.index(d) for d in dele]
+    assert placering == sorted(placering)

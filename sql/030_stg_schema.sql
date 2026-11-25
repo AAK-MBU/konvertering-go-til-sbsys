@@ -225,8 +225,27 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
 CREATE INDEX ix_stg_indsats_sag ON stg.indsats (sag_noegle);
 GO
 
+/* raekkefoelge: indsatserne oprettes sag for sag i kronologisk orden.
+   SBSYS viser dem i oprettelsesraekkefoelge, og PPR vil have dem kronologisk
+   med nyeste oeverst (25-11-2026). Sorteringen, aeldste foerst:
+     1. startdato (Fra)  - tom = 9999-12-31: en indsats uden startdato er
+                           ikke paabegyndt og skal oprettes SIDST, saa den
+                           ligger oeverst (PPR 25-11-2026). Kun sorteringen;
+                           SBSYS faar stadig 1900-01-01 (FIKTIV_STARTDATO).
+     2. slutdato (Til)   - tom = 9999-12-31: en aaben indsats er den nyeste
+     3. Visiteret        - GO-kolonnen i raa_json; tom = 1900-01-01
+     4. kilde_noegle     - goer noeglen unik, saa sideopdelingen
+                           (hent_i_sider) kan gaa frem efter den. */
 CREATE OR ALTER VIEW stg.v_indsatser_til_indlaesning AS
-SELECT i.*, sm.sbsys_id AS sbsys_sag_id
+SELECT i.*, sm.sbsys_id AS sbsys_sag_id,
+       CAST(i.sag_noegle
+            + '|' + CONVERT(CHAR(8), ISNULL(i.periode_start, '99991231'), 112)
+            + '|' + CONVERT(CHAR(8), ISNULL(i.periode_slut,  '99991231'), 112)
+            + '|' + CONVERT(CHAR(8), ISNULL(COALESCE(
+                        TRY_CONVERT(DATE, LEFT(LTRIM(JSON_VALUE(i.raa_json, '$.Visiteret')), 10), 105),
+                        TRY_CONVERT(DATE, LEFT(LTRIM(JSON_VALUE(i.raa_json, '$.Visiteret')), 10), 23)),
+                    '19000101'), 112)
+            + '|' + i.kilde_noegle AS VARCHAR(440)) AS raekkefoelge
 FROM   stg.indsats i
 JOIN   konv.id_map sm                       -- sagen SKAL vaere indlaest foerst
        ON  sm.objekt_type  = 'sag'

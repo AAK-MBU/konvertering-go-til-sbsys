@@ -92,6 +92,9 @@ class IndsatsLoader(Loader[Indsats]):
             filter_sql,
             parametre=params,
             graense=graense,
+            # Sag for sag, ældste startdato først — se viewet. Ikke
+            # kilde_noegle: så lå indsatserne i SBSYS i tilfældig orden.
+            noeglekolonne="raekkefoelge",
         )
 
     def byg(self, raekke: dict[str, Any]) -> Indsats:
