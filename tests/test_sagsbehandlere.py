@@ -170,3 +170,24 @@ def test_navneafvigelse_i_begrundelsen(go, tekst):
     r = _register(("az00001", "Ane Bodil Dahl")).klassificer(go)
     assert r.status == sb.FORSLAG and r.foreslaaet_az == "az00001"
     assert r.begrundelse.split(": ", 1)[1].startswith(tekst), r.begrundelse
+
+
+def test_afklar_bliver_ukendt_bruger(tmp_path):
+    assert _koer(tmp_path, tmp_path) == 0
+    raekker = {r["go_vaerdi"]: r for r in
+               sb.laes_gennemsyn(tmp_path / "sagsbehandlere-gennemsyn.xlsx")}
+    jens = raekker["Jens Hansen"]                                   # navnebrødre
+    assert jens["status"] == sb.AFKLAR and jens["foreslaaet_az"] == ""
+    assert jens["foreslaaet_navn"] == sb.UKENDT_BRUGER
+    assert sb.endelig_vaerdi(jens) == sb.UKENDT_BRUGER
+    assert sb.endelig_vaerdi({**jens, "rettet_vaerdi": "AZ44444"}) == "az44444"
+    assert sb.endelig_vaerdi(raekker["AZ22222"]) == "az22222"
+    # Et afvist forslag bliver også ukendt
+    assert sb.endelig_vaerdi({"foreslaaet_az": "az1", "status": "auto",
+                              "godkendt": "nej"}) == sb.UKENDT_BRUGER
+
+
+def test_afklar_med_az_i_go_vaerdien_foreslaar_ingen_men_viser_kandidaten(personer):
+    r = sb.saml(["Jens Hansen (az22222)"], personer)[0]
+    assert (r.status, r.foreslaaet_az) == (sb.AFKLAR, "")
+    assert any("az22222" in k for k in r.kandidater)

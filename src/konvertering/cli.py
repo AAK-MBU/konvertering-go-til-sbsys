@@ -903,7 +903,8 @@ def _vaerdier_sagsbehandlere(args: argparse.Namespace) -> int:
     sb.skriv(raekker, personer, ud)
 
     status, grund = sb.opsummering(raekker)
-    print(f"\n  auto {status[sb.AUTO]}   forslag {status[sb.FORSLAG]}   afklar {status[sb.AFKLAR]}")
+    print(f"\n  auto {status[sb.AUTO]}   forslag {status[sb.FORSLAG]}   afklar {status[sb.AFKLAR]}"
+          f"  (afklar bliver '{sb.UKENDT_BRUGER}', medmindre rettet_vaerdi er udfyldt)")
     for g, n in grund.most_common():
         print(f"  {n:>6}  {g}")
     if args.tidligere:

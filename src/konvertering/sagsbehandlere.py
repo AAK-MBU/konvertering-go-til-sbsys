@@ -48,6 +48,12 @@ MAKS_KANDIDATER = 5
 
 AUTO, FORSLAG, AFKLAR = "auto", "forslag", "afklar"
 
+# PPR besluttede (25-11-2026): en sagsbehandler på en indsats der ikke kan
+# kobles til en AAK-bruger, får én fælles værdi i stedet for en bruger.
+# Navnet er foreløbigt — det endelige navn/nøgle fastlægges senere, og så er
+# det kun her det skal rettes.
+UKENDT_BRUGER = "Konvertering_Ukendt_Bruger"
+
 GENNEMSYN_KOLONNER = [
     "liste", "go_vaerdi", "foreslaaet_az", "foreslaaet_navn", "aktiv", "slutdato",
     "status", "overfoert", "begrundelse", "kandidater", "godkendt", "rettet_vaerdi",
@@ -342,7 +348,13 @@ class Register:
 
 def saml(go_vaerdier: list[str], personer: dict[str, Person]) -> list[Raekke]:
     reg = Register(personer)
-    return sorted((reg.klassificer(v) for v in go_vaerdier),
+    raekker = [reg.klassificer(v) for v in go_vaerdier]
+    for r in raekker:
+        # Afklar foreslår ingen bruger: uden en rettelse bliver den UKENDT_BRUGER.
+        # Kandidaterne (også en AZ fra GO-værdien) står stadig i "kandidater".
+        if r.status == AFKLAR:
+            r.foreslaaet_az = ""
+    return sorted(raekker,
                   key=lambda r: ({AFKLAR: 0, FORSLAG: 1, AUTO: 2}[r.status], r.go_vaerdi.casefold()))
 
 
@@ -416,6 +428,11 @@ def endelig_az(r: dict[str, str]) -> str | None:
     return None
 
 
+def endelig_vaerdi(r: dict[str, str]) -> str:
+    """Det GO-værdien ender som: en AZ-ident, ellers UKENDT_BRUGER."""
+    return endelig_az(r) or UKENDT_BRUGER
+
+
 def skriv(raekker: list[Raekke], personer: dict[str, Person], sti: Path) -> Path:
     import openpyxl
     from openpyxl.styles import Font
@@ -426,7 +443,8 @@ def skriv(raekker: list[Raekke], personer: dict[str, Person], sti: Path) -> Path
     ark.append(GENNEMSYN_KOLONNER)
     for r in raekker:
         p = personer.get(r.foreslaaet_az)
-        ark.append([LISTE, r.go_vaerdi, r.foreslaaet_az, p.seneste_navn if p else "",
+        navn = p.seneste_navn if p else (UKENDT_BRUGER if r.status == AFKLAR else "")
+        ark.append([LISTE, r.go_vaerdi, r.foreslaaet_az, navn,
                     ("ja" if p.aktiv else "nej") if p else "",
                     p.slutdato if p else None, r.status, r.overfoert, r.begrundelse,
                     " | ".join(r.kandidater), r.godkendt, r.rettet_vaerdi, r.kommentar])
