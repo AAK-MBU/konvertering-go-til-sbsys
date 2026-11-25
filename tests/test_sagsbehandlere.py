@@ -191,3 +191,28 @@ def test_afklar_med_az_i_go_vaerdien_foreslaar_ingen_men_viser_kandidaten(person
     r = sb.saml(["Jens Hansen (az22222)"], personer)[0]
     assert (r.status, r.foreslaaet_az) == (sb.AFKLAR, "")
     assert any("az22222" in k for k in r.kandidater)
+
+
+@pytest.mark.parametrize("a, b", [
+    ("Ane Håstrup Dahl", "Ane Haastrup Dahl"),
+    ("Søren Ærø", "Soeren Aeroe"),
+    ("Sörensen", "Sørensen"),
+    ("René Dahl", "Rene Dahl"),
+])
+def test_norm_aa_ae_oe_og_accenter(a, b):
+    assert sb.norm(a) == sb.norm(b)
+
+
+def test_aa_stavning_matcher_eksakt_blandt_navnebroedre():
+    reg = _register(("az00001", "Ane Haastrup Dahl"), ("az00002", "Ane Yrsa Dahl"))
+    r = reg.klassificer("Ane Håstrup Dahl")
+    assert (r.foreslaaet_az, r.status) == ("az00001", sb.AUTO)
+
+
+def test_aa_stavning_og_en_stavefejl_giver_flest_faelles_navne():
+    """4 navne: å/aa er det samme, og ét navn er stavet forkert i GO. Den
+    rigtige deler 3 af 4; navnebroderen kun for- og efternavn."""
+    reg = _register(("az00001", "Ane Bodil Haastrup Dahl"), ("az00002", "Ane Yrsa Dahl"))
+    r = reg.klassificer("Ane Bodill Håstrup Dahl")
+    assert (r.foreslaaet_az, r.status) == ("az00001", sb.FORSLAG), r.begrundelse
+    assert reg.klassificer("Ane Bodil Håstrup Dahl").status == sb.AUTO

@@ -31,6 +31,7 @@ OneDrive-mappen.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -100,11 +101,22 @@ def norm(navn: str) -> str:
 
     Tekst i parentes fjernes: GO skriver fx "Navn (Inaktiv)", og den
     markering siger intet om hvem personen er. (AZ-identer i parentes er
-    allerede fundet inden.)"""
+    allerede fundet inden.)
+
+    Æ/Ø/Å og deres to-bogstavsformer er det samme navn ("Håstrup" =
+    "Haastrup"); tyske ä/ö/ü skrives ae/oe/ue, og accenter
+    (é, è ...) fjernes."""
     navn = re.sub(r"\([^)]*\)?", " ", navn)
     navn = re.sub(r"[.\u00a0]", " ", navn)
     navn = re.sub(r"\s*-\s*", "-", navn)
-    return re.sub(r"\s+", " ", navn).strip().casefold()
+    navn = re.sub(r"\s+", " ", navn).strip().casefold()
+    navn = navn.translate(_TO_BOGSTAVER)
+    return "".join(c for c in unicodedata.normalize("NFKD", navn)
+                   if not unicodedata.combining(c))
+
+
+_TO_BOGSTAVER = str.maketrans({"æ": "ae", "ø": "oe", "å": "aa", "ä": "ae", "ö": "oe",
+                               "ü": "ue"})
 
 
 def varianter(navn: str) -> set[str]:
