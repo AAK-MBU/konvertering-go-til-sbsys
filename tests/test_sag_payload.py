@@ -501,3 +501,20 @@ def test_test_sagsbehandler_der_ikke_findes_stopper_dokumentet(monkeypatch):
     loader, _ = _forfatter_loader([])
     with pytest.raises(ValideringsFejl):
         loader._forfatter({"forfatter_go": "az12345", "kilde_noegle": "1"})
+
+
+def test_kle_og_facet_kommer_fra_skabelonen_og_slaas_ikke_op():
+    """26-11-2026: skabelonen sætter KLE og facet. En GO-KLE uden mapping
+    må ikke længere afvise sagen."""
+    slaaet_op: list[str] = []
+
+    class Kodelister:
+        def slaa_op(self, liste, vaerdi, paakraevet=False):
+            slaaet_op.append(liste)
+            return "1"
+
+    loader = SagLoader(SimpleNamespace(endpoints=Endpoints(), kodelister=Kodelister()))
+    loader._ansvarlig = lambda raekke: None
+    sag = loader.byg({"kilde_noegle": "S", "kle_go": "17.03.83 Ukendt", "facet_go": "G01"})
+    assert sag.kle is None and sag.facet is None
+    assert "kle" not in slaaet_op and "facet" not in slaaet_op

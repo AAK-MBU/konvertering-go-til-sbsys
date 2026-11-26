@@ -73,10 +73,12 @@ class SagLoader(Loader[Sag]):
             titel=(raekke.get("titel") or "").strip() or "Uden titel",
             go_sagsnummer=raekke.get("go_sagsnummer"),
             beskrivelse=raekke.get("beskrivelse"),
-            # KLE er blokerende: en sag uden korrekt emnesystematik må ikke
-            # oprettes — den kan ikke findes igen og ikke bevaringsvurderes.
-            kle=m.slaa_op("kle", raekke.get("kle_go"), paakraevet=True),
-            facet=m.slaa_op("facet", raekke.get("facet_go"), paakraevet=False),
+            # KLE og facet sendes IKKE: alle sager oprettes fra en
+            # sagsskabelon, og skabelonen sætter selv KLE og facet (besluttet
+            # 26-11-2026 — gælder PPR og de senere emnesager, borgersager og
+            # elevmapper). GO's værdier står stadig i stg.sag (kle_go, facet_go).
+            kle=None,
+            facet=None,
             sagstype=m.slaa_op("sagstype", raekke.get("sagstype_go"), paakraevet=False),
             # Skabelonen er blokerende: SBSYS kan ikke oprette en sag uden.
             skabelon=m.slaa_op("sagsskabelon", raekke.get("sagstype_go"), paakraevet=True),
