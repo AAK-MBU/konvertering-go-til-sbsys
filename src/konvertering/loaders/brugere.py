@@ -29,6 +29,7 @@ class BrugerOpslag:
     def __init__(self, k: Any) -> None:
         self.k = k
         self._cache: dict[str, int | None] = {}
+        self._systemkonto: int | None = None
 
     def bruger_id(self, az: str) -> int | None:
         noegle = logon(az)
@@ -45,3 +46,19 @@ class BrugerOpslag:
                          None) if len(traef) == 1 else None
         self._cache[noegle] = int(bruger_id) if bruger_id else None
         return self._cache[noegle]
+
+    def systemkonto(self) -> int:
+        """MBU-systemkontoen: den konto konverteringen selv kører som
+        (svc_rpa_sbsys..., GET /api/bruger/me). Bruges når GO's bruger ikke
+        findes i SBSYS (besluttet 26-11-2026). Slås op, så samme kode virker
+        i test og prod uden et hårdkodet id."""
+        if self._systemkonto is None:
+            op = self.k.endpoints.operation("hent_mig")
+            svar = self.k.klient.kald(op.metode, op.sti, operation="hent_mig",
+                                      forventede_status=op.forventede_status)
+            krop = svar.krop if isinstance(svar.krop, dict) else {}
+            bruger_id = next((krop[n] for n in ("Id", "id") if krop.get(n) is not None), None)
+            if bruger_id is None:
+                raise RuntimeError("GET /api/bruger/me gav intet bruger-id")
+            self._systemkonto = int(bruger_id)
+        return self._systemkonto

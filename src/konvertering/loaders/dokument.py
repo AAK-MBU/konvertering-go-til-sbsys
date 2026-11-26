@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 from ..files import FILSTATUS_OK
@@ -28,6 +29,36 @@ from .brugere import BrugerOpslag, find_az
 from .sag import TVUNGEN_SAGSBEHANDLER
 
 log = logging.getLogger(__name__)
+
+
+def _tidspunkt(v: Any) -> str | None:
+    if not isinstance(v, datetime):
+        return None
+    return v.strftime("%d-%m-%Y" if (v.hour, v.minute) == (0, 0) else "%d-%m-%Y %H:%M")
+
+
+def go_oplysninger(raekke: dict[str, Any]) -> str | None:
+    """Tekst til en kladdes Beskrivelse: GO's egne kolonner, med GO's navne.
+
+    En kladde i SBSYS kan hverken bære dato, opretter eller behandler —
+    SBSYS sætter selv konverteringens tidspunkt og konto (bekræftet
+    26-11-2026). Så står GO's værdier her som tekst, under kolonnenavnene
+    fra GO's Documents, så ingen skal gætte på hvad de betyder. (Oprettet er
+    for mange dokumenter datoen for importen til GO i februar 2022 — derfor
+    begge datoer.) OprettetAf er AZ-identen som den står i GO; den slås ikke op.
+    """
+    try:
+        raa = json.loads(raekke.get("raa_json") or "{}")
+    except (TypeError, ValueError):
+        raa = {}
+    linjer = []
+    if af := str(raa.get("OprettetAf") or "").strip():
+        linjer.append(f"OprettetAf: {find_az(af) or af}")
+    if dato := _tidspunkt(raekke.get("dokument_dato")):
+        linjer.append(f"Dato: {dato}")
+    if oprettet := _tidspunkt(raekke.get("registreret")):
+        linjer.append(f"Oprettet: {oprettet}")
+    return "\n".join(["Data fra GO:", *linjer]) if linjer else None
 
 
 class DokumentLoader(Loader[Dokument]):
@@ -65,6 +96,7 @@ class DokumentLoader(Loader[Dokument]):
             retning=Retning(retning) if retning in Retning.__members__.values() else Retning.INTERNT,
             version=raekke.get("version"),
             er_kladde=bool(raekke.get("er_kladde")),
+            beskrivelse=go_oplysninger(raekke) if raekke.get("er_kladde") else None,
             fil_sti=raekke.get("fil_relativ_sti"),
             fil_navn=raekke.get("fil_navn"),
             fil_stoerrelse=raekke.get("fil_stoerrelse"),
@@ -130,6 +162,7 @@ class DokumentLoader(Loader[Dokument]):
                     # den ved SBSYS ikke hvilket program der skal aabne
                     # kladden, og den bliver ubrugelig for sagsbehandleren.
                     "filendelse": endelse.lower() or None,
+                    "beskrivelse": objekt.beskrivelse,
                 },
             )
         return self.k.endpoints.byg_payload(

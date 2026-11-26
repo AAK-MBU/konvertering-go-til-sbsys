@@ -379,6 +379,8 @@ class BrugerKlient:
         self.brugere, self.soegninger = brugere, []
 
     def kald(self, metode, sti, **kw):
+        if sti.endswith("/bruger/me"):                       # MBU-systemkontoen
+            return SimpleNamespace(status=200, krop={"Id": 542}, korrelations_id="k")
         assert sti.endswith("/bruger/search")
         self.soegninger.append(kw["json"])
         return SimpleNamespace(status=200, krop={"Results": self.brugere}, korrelations_id="k")
@@ -403,10 +405,11 @@ def test_gos_sagsbehandler_slaas_op_paa_az_identen(monkeypatch):
 
 
 def test_kun_et_praecist_traef_taeller(monkeypatch):
-    """az12345 må ikke ramme az123456, selv om SBSYS svarer med begge."""
+    """az12345 må ikke ramme az123456, selv om SBSYS svarer med begge.
+    Uden et præcist træf bliver det MBU-systemkontoen (26-11-2026)."""
     monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
     loader = _bruger_loader([{"Id": 42, "LogonId": "az123456"}])
-    assert loader._ansvarlig({"ansvarlig_go": "az12345", "kilde_noegle": "K"}) is None
+    assert loader._ansvarlig({"ansvarlig_go": "az12345", "kilde_noegle": "K"}) == "542"
 
 
 def test_mapningen_vinder_over_opslaget(monkeypatch):
@@ -553,3 +556,57 @@ def test_dokumenter_hentes_sag_for_sag_aeldste_foerst():
     dele = ["d.sag_noegle", "ISNULL(d.dokument_dato", "ISNULL(d.registreret", "'|' + d.kilde_noegle"]
     placering = [view.index(d) for d in dele]
     assert placering == sorted(placering)
+
+
+def test_kladde_faar_gos_oprettelse_i_beskrivelsen():
+    from datetime import datetime
+
+    from konvertering.loaders.dokument import DokumentLoader, go_oplysninger
+    from konvertering.models import Dokument
+
+    raekke = {"er_kladde": 1, "dokument_dato": datetime(2019, 3, 12),
+              "registreret": datetime(2022, 2, 19, 14, 3),
+              "raa_json": json.dumps({"OprettetAf": "AZ12345"})}
+    assert go_oplysninger(raekke) == (
+        "Data fra GO:\nOprettetAf: az12345\nDato: 12-03-2019\nOprettet: 19-02-2022 14:03")
+    assert go_oplysninger({"dokument_dato": datetime(2025, 3, 12),
+                           "raa_json": json.dumps({"OprettetAf": "Systemkonto (Inaktiv)"})}) \
+        == "Data fra GO:\nOprettetAf: Systemkonto (Inaktiv)\nDato: 12-03-2025"
+    assert go_oplysninger({"raa_json": None}) is None
+
+    loader = DokumentLoader(SimpleNamespace(endpoints=Endpoints()))
+    p = loader.payload(Dokument(kilde_noegle="K", sag_noegle="S", titel="Udkast", er_kladde=True,
+                                fil_navn="Udkast.docx", beskrivelse="Data fra GO:\nOprettet: 12-03-2025"))
+    assert p["Beskrivelse"] == "Data fra GO:\nOprettet: 12-03-2025"
+
+
+def _sagloader_med_brugere(brugere: list[dict], mig: dict | None = None):
+    kald: list[str] = []
+
+    class K:
+        def kald(self, metode, sti, **kw):
+            kald.append(sti)
+            krop = mig if sti.endswith("/me") else brugere
+            return SimpleNamespace(status=200, krop=krop, korrelations_id="k")
+
+    class Kodelister:
+        def slaa_op(self, *a, **kw):
+            return None
+
+    k = SimpleNamespace(endpoints=Endpoints(), klient=K(), kodelister=Kodelister())
+    return SagLoader(k), kald
+
+
+@pytest.mark.parametrize("go", ["Ukendt Person", "az99999", None, "Systemkonto (Inaktiv)"])
+def test_sag_uden_sbsys_bruger_faar_systemkontoen(monkeypatch, go):
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader, kald = _sagloader_med_brugere([], mig={"Id": 542, "LogonId": "svc_rpa"})
+    assert loader._ansvarlig({"ansvarlig_go": go, "kilde_noegle": "S"}) == "542"
+    assert loader._ansvarlig({"ansvarlig_go": go, "kilde_noegle": "T"}) == "542"
+    assert kald.count("/api/bruger/me") == 1                       # huskes
+
+
+def test_sag_med_az_i_navnet_finder_brugeren(monkeypatch):
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader, _ = _sagloader_med_brugere([{"Id": 4711, "LogonId": "AAK\\az12345"}])
+    assert loader._ansvarlig({"ansvarlig_go": "Anna Test (AZ12345)", "kilde_noegle": "S"}) == "4711"

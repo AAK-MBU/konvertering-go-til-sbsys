@@ -137,6 +137,9 @@ class Dokument(KanoniskObjekt):
     # journaliseret eller en kladde, og en kladde maa ikke journaliseres:
     # det aendrer dokumentets status i en boernesag.
     er_kladde: bool = False
+    # Kun kladder: GO's oprettelse som tekst i Beskrivelse, fordi en kladde
+    # ikke kan bære dato, opretter eller behandler (26-11-2026).
+    beskrivelse: str | None = None
     fil_sti: str | None = None
     fil_navn: str | None = None
     fil_stoerrelse: int | None = None

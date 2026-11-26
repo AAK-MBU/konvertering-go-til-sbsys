@@ -17,7 +17,7 @@ from ..sbsys.errors import (
     ValideringsFejl,
 )
 from .base import Loader, boelge_filter
-from .brugere import BrugerOpslag
+from .brugere import BrugerOpslag, find_az
 
 TOM_AFDELING = "<tom>"
 # Tvinger ÉN sagsbehandler (AZ-ident) på alle sager. Kun til test: PPR-sager
@@ -282,7 +282,9 @@ class SagLoader(Loader[Sag]):
         3. GO's egen sagsbehandler, slået op i SBSYS på AZ-identen. Samme
            AD-identitet i begge systemer — ikke et gæt.
 
-        Findes ingen, sendes intet, og SBSYS afviser en beskyttet sag.
+        4. Ellers MBU-systemkontoen (den konto konverteringen kører som) —
+           besluttet 26-11-2026. Så afviser SBSYS aldrig en beskyttet sag
+           for manglende behandler.
         """
         tvungen = os.environ.get(TVUNGEN_SAGSBEHANDLER, "").strip()
         if tvungen:
@@ -302,13 +304,16 @@ class SagLoader(Loader[Sag]):
         mappet = self.k.kodelister.slaa_op("bruger", go, paakraevet=False)
         if mappet:
             return mappet
-        if go and str(go).strip():
-            bruger_id = self._bruger_id(str(go))
+        az = find_az(go)
+        if az:
+            bruger_id = self._bruger_id(az)
             if bruger_id is not None:
                 return str(bruger_id)
-            log.warning("Sag %s: GO's sagsbehandler findes ikke i SBSYS",
-                        kort_noegle(str(raekke.get("kilde_noegle"))))
-        return None
+        # 4. Ingen SBSYS-bruger: MBU-systemkontoen (besluttet 26-11-2026).
+        log.warning("Sag %s: GO's sagsbehandler kan ikke kobles til en SBSYS-bruger "
+                    "- sagen får MBU-systemkontoen",
+                    kort_noegle(str(raekke.get("kilde_noegle"))))
+        return str(self._brugere.systemkonto())
 
     def _bruger_id(self, az: str) -> int | None:
         return self._brugere.bruger_id(az)
