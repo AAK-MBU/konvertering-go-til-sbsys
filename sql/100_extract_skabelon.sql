@@ -270,7 +270,9 @@ SELECT
     d.[DokumentKategori],
     TRY_CONVERT(DATETIME2(3), d.[Dato]),
     TRY_CONVERT(DATETIME2(3), d.[Oprettet]),
-    COALESCE(d.[DokumentAnsvarlig], d.[OprettetAf]),
+    /* PPR 25-11-2026: "Oprettet af" skal vaere den faktiske opretter i GO,
+       ikke den ansvarlige. Ansvarlig kun hvis OprettetAf er tom. */
+    COALESCE(NULLIF(LTRIM(RTRIM(d.[OprettetAf])), N''), d.[DokumentAnsvarlig]),
     /* A21 besvaret 11-11-2026: GO har ikke et ind-/udgaaende-begreb.
        Forskellen paa et dokument i SBSYS er journaliseret vs. kladde,
        og den baeres af er_kladde nedenfor. */

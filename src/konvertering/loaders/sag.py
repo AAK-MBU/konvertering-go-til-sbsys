@@ -17,6 +17,7 @@ from ..sbsys.errors import (
     ValideringsFejl,
 )
 from .base import Loader, boelge_filter
+from .brugere import BrugerOpslag
 
 TOM_AFDELING = "<tom>"
 # Tvinger ÉN sagsbehandler (AZ-ident) på alle sager. Kun til test: PPR-sager
@@ -51,8 +52,7 @@ class SagLoader(Loader[Sag]):
         self._part_cache: dict[str, int] = {}
         # kilde_noegle -> (CPR/CVR formateret til SBSYS, er_firma). Til genfindingen.
         self._part_nummer: dict[str, tuple[str, bool]] = {}
-        # AZ-ident (casefold) -> SBSYS-bruger-id, eller None hvis ikke fundet.
-        self._bruger_cache: dict[str, int | None] = {}
+        self._brugere = BrugerOpslag(k)
         self._tvungen_advaret = False
 
     def hent_arbejde(self, graense: int | None = None) -> Iterable[dict[str, Any]]:
@@ -298,25 +298,7 @@ class SagLoader(Loader[Sag]):
         return None
 
     def _bruger_id(self, az: str) -> int | None:
-        """AZ-ident -> SBSYS-bruger-id via brugersøgningen. Huskes for kørslen.
-
-        Kun ét PRÆCIST træf tæller. LogonId sammenlignes uden domæne
-        (``AAK\\az12345``, ``az12345@...``) og uden hensyn til store/små
-        bogstaver; søger SBSYS bredere end på identen, filtreres det fra her.
-        """
-        noegle = _logon(az)
-        if noegle in self._bruger_cache:
-            return self._bruger_cache[noegle]
-        op = self.k.endpoints.operation("soeg_bruger")
-        svar = self.k.klient.kald(
-            op.metode, op.sti, operation="soeg_bruger",
-            json={"LogonId": az.strip()}, forventede_status=(200, 204, 404),
-        )
-        traef = [t for t in self.k.endpoints.soegningstraef(svar.krop)
-                 if _logon(str(t.get("LogonId") or "")) == noegle]
-        bruger_id = _foerste(traef[0], "Id", "id") if len(traef) == 1 else None
-        self._bruger_cache[noegle] = int(bruger_id) if bruger_id else None
-        return self._bruger_cache[noegle]
+        return self._brugere.bruger_id(az)
 
     def _slaa_part_op(self, nummer: str, er_firma: bool) -> int:
         """CPR/CVR -> SBSYS' interne PartId. Resultatet huskes for kørslen.
@@ -446,8 +428,3 @@ def _foerste(krop: Any, *navne: str) -> Any:
         if krop.get(navn) is not None:
             return krop[navn]
     return None
-
-
-def _logon(vaerdi: str) -> str:
-    """``AAK\\AZ12345`` / ``az12345@aarhus.dk`` / ``az12345`` -> ``az12345``."""
-    return vaerdi.strip().split("\\")[-1].split("@")[0].casefold()

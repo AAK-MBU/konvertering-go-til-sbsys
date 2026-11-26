@@ -432,3 +432,72 @@ def test_tvungen_sagsbehandler_der_ikke_findes_afviser_sagen(monkeypatch):
     monkeypatch.setenv("TEST_SAGSBEHANDLER_AZ", "az000")
     with pytest.raises(ValideringsFejl):
         _bruger_loader(BRUGERE)._ansvarlig({"ansvarlig_go": None, "kilde_noegle": "K"})
+
+
+# --- dokumentets opretter (PPR 25-11-2026) --------------------------------
+
+def _forfatter_loader(brugere: list[dict]):
+    from konvertering.loaders.dokument import DokumentLoader
+
+    kald: list[dict] = []
+
+    class K:
+        def kald(self, metode, sti, **kw):
+            kald.append(kw.get("json"))
+            return SimpleNamespace(status=200, krop=brugere, korrelations_id="k")
+
+    class Kodelister:
+        def slaa_op(self, *a, **kw):
+            return None
+
+    k = SimpleNamespace(endpoints=Endpoints(), klient=K(), kodelister=Kodelister())
+    return DokumentLoader(k), kald
+
+
+def test_dokumentets_opretter_slaas_op_paa_az_identen():
+    loader, kald = _forfatter_loader([{"Id": 4711, "LogonId": "AAK\\AZ12345"},
+                                      {"Id": 1, "LogonId": "AAK\\AZ123456"}])
+    assert loader._forfatter({"forfatter_go": "az12345", "kilde_noegle": "1"}) == "4711"
+    assert loader._forfatter({"forfatter_go": "AZ12345", "kilde_noegle": "2"}) == "4711"
+    assert len(kald) == 1                                    # huskes for kørslen
+
+
+@pytest.mark.parametrize("raekke", [
+    {"forfatter_go": "Systemkonto (Inaktiv)"},
+    {"forfatter_go": None},
+    {"forfatter_go": "az12345", "er_kladde": 1},             # kladder kan ikke bære det
+])
+def test_ingen_opretter_uden_az_eller_paa_kladder(raekke):
+    loader, kald = _forfatter_loader([{"Id": 4711, "LogonId": "az12345"}])
+    assert loader._forfatter({"kilde_noegle": "1", **raekke}) is None
+    assert kald == []
+
+
+def test_opretter_der_ikke_findes_i_sbsys_sendes_ikke():
+    loader, _ = _forfatter_loader([])
+    assert loader._forfatter({"forfatter_go": "az99999", "kilde_noegle": "1"}) is None
+
+
+def test_extract_tager_oprettetaf_foer_ansvarlig():
+    sql = (Path(__file__).resolve().parents[1] / "sql" / "100_extract_skabelon.sql"
+           ).read_text(encoding="utf-8")
+    assert "COALESCE(NULLIF(LTRIM(RTRIM(d.[OprettetAf])), N''), d.[DokumentAnsvarlig])" in sql
+
+
+def test_test_sagsbehandler_tvinges_som_opretter(monkeypatch):
+    monkeypatch.setenv("TEST_SAGSBEHANDLER_AZ", "az54321")
+    loader, kald = _forfatter_loader([{"Id": 77, "LogonId": "az54321"}])
+    assert loader._forfatter({"forfatter_go": "Systemkonto (Inaktiv)", "kilde_noegle": "1"}) == "77"
+    assert loader._forfatter({"forfatter_go": "az12345", "kilde_noegle": "2"}) == "77"
+    assert loader._forfatter({"forfatter_go": "az12345", "er_kladde": 1,
+                              "kilde_noegle": "3"}) is None
+    assert kald == [{"LogonId": "az54321"}]
+
+
+def test_test_sagsbehandler_der_ikke_findes_stopper_dokumentet(monkeypatch):
+    from konvertering.sbsys.errors import ValideringsFejl
+
+    monkeypatch.setenv("TEST_SAGSBEHANDLER_AZ", "az54321")
+    loader, _ = _forfatter_loader([])
+    with pytest.raises(ValideringsFejl):
+        loader._forfatter({"forfatter_go": "az12345", "kilde_noegle": "1"})

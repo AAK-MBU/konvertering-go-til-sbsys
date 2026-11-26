@@ -15,14 +15,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Iterable
 from typing import Any
 
 from ..files import FILSTATUS_OK
 from ..hashing import kort_noegle
 from ..models import Dokument, Objekttype, Retning
-from ..sbsys.errors import FilFejl, PermanentFejl
+from ..sbsys.errors import FilFejl, PermanentFejl, ValideringsFejl
 from .base import Loader, boelge_filter
+from .brugere import BrugerOpslag, find_az
+from .sag import TVUNGEN_SAGSBEHANDLER
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +33,11 @@ log = logging.getLogger(__name__)
 class DokumentLoader(Loader[Dokument]):
     arbejdsliste = "stg.v_dokumenter_til_indlaesning"
     objekt_type = Objekttype.DOKUMENT
+
+    def __init__(self, k: Any) -> None:
+        super().__init__(k)
+        self._brugere = BrugerOpslag(k)
+        self._tvungen_advaret = False
 
     def hent_arbejde(self, graense: int | None = None) -> Iterable[dict[str, Any]]:
         filter_sql, params = boelge_filter(self.k.boelge)
@@ -50,7 +58,7 @@ class DokumentLoader(Loader[Dokument]):
             kategori=m.slaa_op("dokumentkategori", raekke.get("kategori_go"), paakraevet=False),
             dokument_dato=raekke.get("dokument_dato"),
             registreret=raekke.get("registreret"),
-            forfatter=m.slaa_op("bruger", raekke.get("forfatter_go"), paakraevet=False),
+            forfatter=self._forfatter(raekke),
             retning=Retning(retning) if retning in Retning.__members__.values() else Retning.INTERNT,
             version=raekke.get("version"),
             er_kladde=bool(raekke.get("er_kladde")),
@@ -60,6 +68,46 @@ class DokumentLoader(Loader[Dokument]):
             fil_sha256=raekke.get("fil_sha256"),
             mime=raekke.get("mime"),
         )
+
+    def _forfatter(self, raekke: dict[str, Any]) -> str | None:
+        """GO's OprettetAf som SBSYS-bruger-id -> "Registreret af".
+
+        0. ``TEST_SAGSBEHANDLER_AZ`` i .env tvinger den bruger på alle
+           dokumenter, som på sagerne. Kun til test; der advares.
+        1. En række i mapping/bruger.csv (GO-værdi -> SBSYS-id).
+        2. AZ-identen i GO-værdien, slået op i SBSYS (samme som sagsbehandleren).
+
+        Ellers sendes intet, og SBSYS skriver konverteringens konto — fx for
+        "Systemkonto (Inaktiv)" og fratrådte uden en SBSYS-bruger. Kladder kan
+        slet ikke bære en opretter (KladdeRedigerDto har intet felt til det).
+        """
+        if raekke.get("er_kladde"):
+            return None
+        tvungen = os.environ.get(TVUNGEN_SAGSBEHANDLER, "").strip()
+        if tvungen:
+            if not self._tvungen_advaret:
+                log.warning("%s er sat: ALLE dokumenter registreres af samme bruger. "
+                            "Kun til test.", TVUNGEN_SAGSBEHANDLER)
+                self._tvungen_advaret = True
+            bruger_id = self._brugere.bruger_id(tvungen)
+            if bruger_id is None:
+                raise ValideringsFejl(
+                    f"{TVUNGEN_SAGSBEHANDLER} findes ikke som bruger i SBSYS",
+                    regel="opretter_ikke_i_sbsys", felt="forfatter")
+            return str(bruger_id)
+        go = raekke.get("forfatter_go")
+        mappet = self.k.kodelister.slaa_op("bruger", go, paakraevet=False)
+        if mappet:
+            return mappet
+        az = find_az(go)
+        if az is None:
+            return None
+        bruger_id = self._brugere.bruger_id(az)
+        if bruger_id is None:
+            log.warning("Dokument %s: opretteren fra GO findes ikke som bruger i SBSYS",
+                        kort_noegle(str(raekke.get("kilde_noegle"))))
+            return None
+        return str(bruger_id)
 
     def payload(self, objekt: Dokument) -> dict[str, Any]:
         if objekt.er_kladde:
