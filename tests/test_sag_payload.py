@@ -533,3 +533,23 @@ def test_ppr_sager_faar_sagsprofilen_som_titel(raekke, titel):
     from konvertering.loaders.sag import sagstitel
 
     assert sagstitel(raekke) == titel
+
+
+def test_dokumenter_hentes_sag_for_sag_aeldste_foerst():
+    from konvertering.loaders.dokument import DokumentLoader
+
+    kald: dict[str, Any] = {}
+
+    class Db:
+        def hent_i_sider(self, kilde, *filtre, **kw):
+            kald.update(kw)
+            return []
+
+    list(DokumentLoader(SimpleNamespace(db=Db(), boelge=None)).hent_arbejde())
+    assert kald["noeglekolonne"] == "raekkefoelge"
+    sql = (Path(__file__).resolve().parents[1] / "sql" / "030_stg_schema.sql"
+           ).read_text(encoding="utf-8")
+    view = sql.split("VIEW stg.v_dokumenter_til_indlaesning")[1].split("\nGO")[0]
+    dele = ["d.sag_noegle", "ISNULL(d.dokument_dato", "ISNULL(d.registreret", "'|' + d.kilde_noegle"]
+    placering = [view.index(d) for d in dele]
+    assert placering == sorted(placering)

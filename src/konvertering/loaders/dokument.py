@@ -46,6 +46,9 @@ class DokumentLoader(Loader[Dokument]):
             filter_sql,
             parametre=params,
             graense=graense,
+            # Sag for sag, ældste først — se viewet. SBSYS viser senest
+            # oprettede øverst, så det nyeste dokument/kladde ligger øverst.
+            noeglekolonne="raekkefoelge",
         )
 
     def byg(self, raekke: dict[str, Any]) -> Dokument:

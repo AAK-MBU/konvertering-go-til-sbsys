@@ -170,8 +170,19 @@ WHERE  m.id_map_id IS NULL
    OR  m.status IN ('pending', 'failed');
 GO
 
+/* raekkefoelge: dokumenter og kladder oprettes sag for sag, aeldste
+   foerst, saa SBSYS' standardsortering (senest oprettet oeverst) viser det
+   nyeste dokument oeverst (26-11-2026, som indsatserne):
+     1. Dato     (dokument_dato, GO's Documents.Dato) - tom = aeldst
+     2. Oprettet (registreret, GO's Documents.Oprettet, med klokkeslaet)
+     3. kilde_noegle - goer noeglen unik til sideopdelingen (hent_i_sider).
+   Stil 121 giver altid 'aaaa-mm-dd tt:mm:ss.fff' (fast laengde). */
 CREATE OR ALTER VIEW stg.v_dokumenter_til_indlaesning AS
-SELECT d.*, sm.sbsys_id AS sbsys_sag_id
+SELECT d.*, sm.sbsys_id AS sbsys_sag_id,
+       CAST(d.sag_noegle
+            + '|' + CONVERT(CHAR(23), ISNULL(d.dokument_dato, '19000101'), 121)
+            + '|' + CONVERT(CHAR(23), ISNULL(d.registreret,   '19000101'), 121)
+            + '|' + d.kilde_noegle AS VARCHAR(460)) AS raekkefoelge
 FROM   stg.dokument d
 JOIN   konv.id_map sm                       -- sagen SKAL være indlæst først
        ON  sm.objekt_type = 'sag'
