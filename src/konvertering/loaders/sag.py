@@ -43,6 +43,17 @@ def afdeling_noegle(raekke: dict[str, Any]) -> str:
 log = logging.getLogger(__name__)
 
 
+def sagstitel(raekke: dict[str, Any]) -> str:
+    """PPR-sager får sagsprofilen som titel (Psykolog, ABA ...), uanset hvad
+    GO's sagsnavn er — det er ofte barnets navn (besluttet 26-11-2026).
+    Emnesager, elevmapper og borgersager: GO's sagsnavn 1:1."""
+    if (raekke.get("organisering_go") or "").strip().upper() == "PPR":
+        profil = (raekke.get("sagstype_go") or "").strip()
+        if profil:
+            return profil
+    return (raekke.get("titel") or "").strip() or "Uden titel"
+
+
 class SagLoader(Loader[Sag]):
     arbejdsliste = "stg.v_sager_til_indlaesning"
     objekt_type = Objekttype.SAG
@@ -70,7 +81,7 @@ class SagLoader(Loader[Sag]):
         m = self.k.kodelister
         return Sag(
             kilde_noegle=str(raekke["kilde_noegle"]),
-            titel=(raekke.get("titel") or "").strip() or "Uden titel",
+            titel=sagstitel(raekke),
             go_sagsnummer=raekke.get("go_sagsnummer"),
             beskrivelse=raekke.get("beskrivelse"),
             # KLE og facet sendes IKKE: alle sager oprettes fra en

@@ -518,3 +518,18 @@ def test_kle_og_facet_kommer_fra_skabelonen_og_slaas_ikke_op():
     sag = loader.byg({"kilde_noegle": "S", "kle_go": "17.03.83 Ukendt", "facet_go": "G01"})
     assert sag.kle is None and sag.facet is None
     assert "kle" not in slaaet_op and "facet" not in slaaet_op
+
+
+@pytest.mark.parametrize("raekke, titel", [
+    ({"organisering_go": "PPR", "sagstype_go": "Psykolog", "titel": "Barn Barnesen 0101"},
+     "Psykolog"),
+    ({"organisering_go": "ppr ", "sagstype_go": " ABA ", "titel": "Noget andet"}, "ABA"),
+    ({"organisering_go": "EMN", "sagstype_go": "Emnesag", "titel": "Budget 2024"},
+     "Budget 2024"),
+    ({"organisering_go": "BOR", "sagstype_go": "X", "titel": "Borgersag"}, "Borgersag"),
+    ({"organisering_go": "ELM", "sagstype_go": "X", "titel": " "}, "Uden titel"),
+])
+def test_ppr_sager_faar_sagsprofilen_som_titel(raekke, titel):
+    from konvertering.loaders.sag import sagstitel
+
+    assert sagstitel(raekke) == titel
