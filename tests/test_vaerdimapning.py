@@ -323,3 +323,46 @@ def test_samme_nummer_flere_aktive_eller_kun_inaktiv_er_ikke_klar():
     assert [v.status for v in valg] == [vm.MANGLER_I_SBSYS, vm.MANGLER_I_SBSYS]
     assert "2 aktive" in valg[0].bemaerkning
     assert "0 aktive" in valg[1].bemaerkning
+
+
+def test_gem_i_db_erstatter_alt_i_en_transaktion():
+    from contextlib import contextmanager
+
+    class Markoer:
+        def __init__(self):
+            self.kald = []
+
+        def execute(self, sql, *p):
+            self.kald.append((sql, p))
+
+    class Db:
+        markoer = Markoer()
+        transaktioner = 0
+
+        @contextmanager
+        def transaktion(self):
+            Db.transaktioner += 1
+            yield self.markoer
+
+    m = {"liste": "institution", "go_feltnavn": "SkoleEllerInstitution",
+         "go_feltvaerdi": "Spiren, Hjortshøj [178]",
+         "vaerdiliste_external_key": "v_skole_el_institution_ppr",
+         "vaerdimulighed_external_key": "lisid_178", "vaerdimulighed_navn": "Spiren [178]",
+         "noegletype": "lisid", "status": "klar", "kommentar": ""}
+    assert vm.gem_i_db(Db(), [m, m | {"go_feltvaerdi": "Spiren [178]"}], "g.xlsx") == 2
+    kald = Db.markoer.kald
+    assert Db.transaktioner == 1
+    assert kald[0][0] == "DELETE FROM map.vaerdilistemulighed"
+    assert [k[0].startswith("INSERT INTO map.vaerdilistemulighed") for k in kald[1:]] == [True] * 2
+    # kommentar "" -> NULL, kilde til sidst
+    assert kald[1][1][-2:] == (None, "g.xlsx")
+
+
+def test_noegletabellen_findes_i_map_skemaet():
+    from pathlib import Path
+    sql = (Path(__file__).resolve().parents[1] / "sql" / "020_map_schema.sql").read_text(
+        encoding="utf-8")
+    assert "CREATE TABLE map.vaerdilistemulighed" in sql
+    for kolonne in vm.MULIGHED_KOLONNER:
+        assert f"    {kolonne} " in sql, kolonne
+    assert "map.v_vaerdilistemuligheder_til_lis" in sql

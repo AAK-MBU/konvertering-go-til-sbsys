@@ -497,6 +497,8 @@ def _parser() -> argparse.ArgumentParser:
                             "direkte fra BU-API'et med GET i stedet for --sbsys-filer")
     v_map.add_argument("--ud", type=Path, default=None,
                        help="Mappe til resultatet. Standard: samme mappe som gennemsynet")
+    v_map.add_argument("--gem-db", action="store_true",
+                       help="Gem nøgletabellen i map.vaerdilistemulighed (erstatter indholdet)")
     v_map.add_argument("--flet", action="append", default=[], metavar="LISTE",
                        help="Flet listens 'klar'-rækker ind i mapping/tilbudsfeltvaerdi.csv "
                             "(eksisterende nøgler erstattes). Kan gentages")
@@ -811,6 +813,18 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
           + ", ".join(f"{k} {n}" for k, n in sorted(typer.items())) + ")")
     if not sbsys:
         print("\nIngen SBSYS-lister givet, så intet er 'klar'. Brug --sbsys LISTE=FIL.")
+    if args.gem_db:
+        ikke_tjekket = sorted({v.liste for v in valg if v.status == vm.IKKE_TJEKKET})
+        if ikke_tjekket:
+            print(f"--gem-db: {', '.join(ikke_tjekket)} er ikke tjekket mod SBSYS. "
+                  f"Brug --hent-sbsys. Intet gemt.", file=sys.stderr)
+            return 1
+        db = Database(Settings.fra_environment().db)
+        try:
+            antal = vm.gem_i_db(db, muligheder, args.fil.name)
+        finally:
+            db.luk()
+        print(f"  gemt i db:     map.vaerdilistemulighed ({antal} rækker, erstattet)")
     for liste in args.flet:
         if liste not in sbsys:
             print(f"--flet {liste}: listen er ikke tjekket mod SBSYS (mangler --sbsys "

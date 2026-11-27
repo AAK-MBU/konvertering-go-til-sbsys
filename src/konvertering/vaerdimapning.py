@@ -30,6 +30,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from .mapping import KOLONNER as MAPPING_KOLONNER
 
@@ -525,6 +526,26 @@ def vaerdilistemuligheder(res: Resultat,
                 "kommentar": ". ".join(kommentar),
             })
     return ud
+
+
+MULIGHED_KOLONNER = ["liste", "go_feltnavn", "go_feltvaerdi", "vaerdiliste_external_key",
+                     "vaerdimulighed_external_key", "vaerdimulighed_navn", "noegletype",
+                     "status", "kommentar"]
+
+
+def gem_i_db(db: Any, muligheder: list[dict[str, str]], kilde: str) -> int:
+    """Erstat map.vaerdilistemulighed med ``muligheder`` i ÉN transaktion.
+
+    Slår indsættelsen fejl (fx en dublet), rulles sletningen også tilbage,
+    så tabellen aldrig står halvt fyldt."""
+    sql = (f"INSERT INTO map.vaerdilistemulighed ({', '.join(MULIGHED_KOLONNER)}, kilde) "
+           f"VALUES ({', '.join('?' * (len(MULIGHED_KOLONNER) + 1))})")
+    with db.transaktion() as markoer:
+        markoer.execute("DELETE FROM map.vaerdilistemulighed")
+        for m in muligheder:
+            markoer.execute(sql, *[m[k] or None if k == "kommentar" else m[k]
+                                   for k in MULIGHED_KOLONNER], kilde)
+    return len(muligheder)
 
 
 def kolonner_for(liste: str) -> set[str]:
