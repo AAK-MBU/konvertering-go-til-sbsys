@@ -61,8 +61,10 @@ def test_kun_eksakt_navn_i_sbsys_er_klar():
                     "auto")]
     vm.byg(valg, SBSYS)
     assert (valg[0].status, valg[0].sbsys_id) == (vm.KLAR, 424)
-    assert valg[1].status == vm.MANGLER_I_SBSYS
-    assert "Børnehaven Svend-Åge (SDT) [29]" in valg[1].bemaerkning
+    # Samme nummer [29], andet navn -> SBSYS' valgmulighed bruges (27-11-2026).
+    assert (valg[1].status, valg[1].sbsys_id) == (vm.KLAR, 353)
+    assert valg[1].sbsys_navn == "Børnehaven Svend-Åge (SDT) [29]"
+    assert "Samme nummer, andet navn" in valg[1].bemaerkning
     assert valg[2].status == vm.MANGLER_I_SBSYS
     assert "Hasle Skole [600]" in valg[2].bemaerkning
 
@@ -283,3 +285,41 @@ def test_noegletabellen_har_kun_tre_statusser():
                                          vm.UAFKLARET, vm.IKKE_TJEKKET)} == {
         "klar", "mangler_i_sbsys", "uafklaret"}
     assert vm.tabel_status(vm.INGEN_TEKSTMATCH) == "mangler_i_sbsys"
+
+
+def test_samme_nummer_andet_navn_er_klar_ogsaa_instnr():
+    sbsys = {"institution": [
+        {"id": 997, "vaerdiMulighed": "Spiren [178]", "aktiv": True},
+        {"id": 1, "vaerdiMulighed": "Risskov Efterskole [instnr 280307]", "aktiv": True},
+    ]}
+    valg = [vm.Valg("institution", "Spiren, Hjortshøj [178]", ["Institution"],
+                    "Spiren, Hjortshøj [178]", "auto"),
+            vm.Valg("institution", "Spiren [178]", ["Institution"], "Spiren [178]", "auto"),
+            vm.Valg("institution", "Risskov efterskole [instnr 280307]", ["Institution"],
+                    "Risskov Efterskole, Risskov [instnr 280307]", "auto")]
+    res = vm.byg(valg, sbsys)
+    assert [(v.status, v.sbsys_id) for v in valg] == [(vm.KLAR, 997), (vm.KLAR, 997),
+                                                       (vm.KLAR, 1)]
+    # Begge Spiren-stavemåder ender på samme valgmulighed -> intet at tjekke.
+    assert not [t for t in res.tjek if "[178]" in t["problem"]]
+    raekker = vm.mapping_raekker(res, "g.xlsx")
+    assert {r["sbsys_vaerdi"] for r in raekker} == {"Spiren [178]",
+                                                    "Risskov Efterskole [instnr 280307]"}
+    noegler = {(m["go_feltvaerdi"], m["vaerdimulighed_external_key"], m["status"])
+               for m in vm.vaerdilistemuligheder(res)}
+    assert ("Spiren, Hjortshøj [178]", "lisid_178", vm.KLAR) in noegler
+
+
+def test_samme_nummer_flere_aktive_eller_kun_inaktiv_er_ikke_klar():
+    sbsys = {"institution": [
+        {"id": 1, "vaerdiMulighed": "Spiren [178]", "aktiv": True},
+        {"id": 2, "vaerdiMulighed": "Spiren Nord [178]", "aktiv": True},
+        {"id": 3, "vaerdiMulighed": "Gammel [55]", "aktiv": False},
+    ]}
+    valg = [vm.Valg("institution", "Spiren, Hjortshøj [178]", ["Institution"],
+                    "Spiren, Hjortshøj [178]", "auto"),
+            vm.Valg("institution", "Ny [55]", ["Institution"], "Ny [55]", "auto")]
+    vm.byg(valg, sbsys)
+    assert [v.status for v in valg] == [vm.MANGLER_I_SBSYS, vm.MANGLER_I_SBSYS]
+    assert "2 aktive" in valg[0].bemaerkning
+    assert "0 aktive" in valg[1].bemaerkning

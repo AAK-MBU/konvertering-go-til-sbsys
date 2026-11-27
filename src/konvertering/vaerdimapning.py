@@ -83,6 +83,15 @@ def lis_nr(tekst: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+def id_noegle(tekst: str | None) -> str | None:
+    """"Navn [N]" -> "lisid_N", "Navn [instnr N]" -> "instnr_N", ellers None."""
+    if m := _INSTNR.search(tekst or ""):
+        return f"instnr_{m.group(1)}"
+    if nr := lis_nr(tekst):
+        return f"lisid_{nr}"
+    return None
+
+
 @dataclass
 class Valg:
     """Én GO-stavemåde og hvad gennemsynet besluttede for den."""
@@ -211,13 +220,13 @@ def byg(valg: list[Valg], sbsys: dict[str, list[dict]]) -> Resultat:
 
     for liste, muligheder in sbsys.items():
         paa_navn: dict[str, list[dict]] = defaultdict(list)
-        paa_lis: dict[str, list[dict]] = defaultdict(list)
+        paa_id: dict[str, list[dict]] = defaultdict(list)
         uden_nr: dict[str, list[dict]] = defaultdict(list)
         for m in muligheder:
             paa_navn[_norm(m["vaerdiMulighed"])].append(m)
             uden_nr[_uden_nr(m["vaerdiMulighed"])].append(m)
-            if nr := lis_nr(m["vaerdiMulighed"]):
-                paa_lis[nr].append(m)
+            if noegle := id_noegle(m["vaerdiMulighed"]):
+                paa_id[noegle].append(m)
         for v in (v for v in valg if v.liste == liste and v.endelig):
             traef = paa_navn.get(_norm(v.endelig), [])
             aktive = [m for m in traef if m.get("aktiv", True)] or traef
@@ -227,12 +236,23 @@ def byg(valg: list[Valg], sbsys: dict[str, list[dict]]) -> Resultat:
                 if len(traef) > 1:
                     v.bemaerkning = f"SBSYS har {len(traef)} valgmuligheder med dette navn"
                 continue
+            # Navnet afviger, men nummeret ("[N]" / "[instnr N]") er det samme:
+            # præcis én aktiv valgmulighed med det nummer -> den bruges
+            # (besluttet 27-11-2026). Nummeret er identiteten, navnet kun en etiket.
+            noegle = id_noegle(v.endelig)
+            kandidater = paa_id.get(noegle, []) if noegle else []
+            aktive = [m for m in kandidater if m.get("aktiv", True)]
+            if len(aktive) == 1:
+                v.sbsys_id, v.sbsys_navn = int(aktive[0]["id"]), aktive[0]["vaerdiMulighed"]
+                v.status = KLAR
+                v.bemaerkning = (f"Samme nummer, andet navn: GO '{v.endelig}' -> "
+                                 f"SBSYS '{v.sbsys_navn}'")
+                continue
             v.status = MANGLER_I_SBSYS
-            nr = lis_nr(v.endelig)
-            kandidater = paa_lis.get(nr, []) if nr else []
             if kandidater:
                 navne = " / ".join(sorted({m["vaerdiMulighed"] for m in kandidater}))
-                v.bemaerkning = f"SBSYS har samme LIS-nr med navnet: {navne}"
+                v.bemaerkning = (f"SBSYS har {len(aktive)} aktive valgmuligheder med samme "
+                                 f"nummer: {navne}")
             elif kandidater := uden_nr.get(_uden_nr(v.endelig), []):
                 navne = " / ".join(sorted({m["vaerdiMulighed"] for m in kandidater}))
                 v.bemaerkning = f"SBSYS har samme navn med andet/intet nummer: {navne}"
@@ -245,7 +265,7 @@ def byg(valg: list[Valg], sbsys: dict[str, list[dict]]) -> Resultat:
     pr_nr: dict[tuple[str, str], set[str]] = defaultdict(set)
     for v in valg:
         if v.endelig and (nr := lis_nr(v.endelig)):
-            pr_nr[(v.liste, nr)].add(v.endelig)
+            pr_nr[(v.liste, nr)].add(v.sbsys_navn or v.endelig)
     for (liste, nr), navne in sorted(pr_nr.items()):
         if len(navne) > 1:
             res.tjek.append({"liste": liste, "go_vaerdi": "", "endelig": " / ".join(sorted(navne)),
