@@ -191,13 +191,11 @@ class SagLoader(Loader[Sag]):
             krop[e.felt("sag", "parter")] = [part]
 
         efter: dict[str, Any] = {}
-        # Sagens Kommentar står ikke på CreateSagFromSkabelonDto i spec'en,
-        # kun på SagDtoV10 (PUT /api/sag/{id}). FORSØG (27-11-2026): den sendes
-        # alligevel med i oprettelsen. Tager SBSYS imod den, springer
-        # _saet_kommentar PUT'en over og logger det; ellers sætter PUT'en den.
+        # Sagens Kommentar står ikke på CreateSagFromSkabelonDto, kun på
+        # SagDtoV10 (PUT /api/sag/{id}). Prøvet i prod 27-11-2026 (sag 58054):
+        # sendt med i oprettelsen ignoreres den. Den sættes derfor bagefter.
         kommentar = sagskommentar(objekt.go_sagsnummer, objekt.oprettet_dato)
         if kommentar:
-            krop["Kommentar"] = kommentar
             efter["kommentar"] = kommentar
         if objekt.status:
             # Kommentaren sendes altid: en status kan have RequireComments

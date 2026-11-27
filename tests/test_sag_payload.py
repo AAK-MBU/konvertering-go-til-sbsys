@@ -684,7 +684,7 @@ def test_kommentar_saettes_med_hel_sag_foer_status():
     s = _sag(go_sagsnummer="PPR-2026-000134-002", oprettet_dato=datetime(2015, 3, 1))
     p = loader.payload(s)
     assert p[EFTER_OPRETTELSE]["kommentar"].startswith("PPR-2026-000134-002\n")
-    assert p["Kommentar"] == p[EFTER_OPRETTELSE]["kommentar"], "forsøg: med i oprettelsen"
+    assert "Kommentar" not in p, "oprettelsen ignorerer den (prod 27-11-2026)"
     loader.send(s, p)
     kald = [(k["metode"], k["sti"]) for k in klient.log]
     assert kald[-4:] == [("POST", "/api/sag/template"), ("GET", "/api/sag/1001"),
