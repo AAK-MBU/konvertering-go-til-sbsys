@@ -126,3 +126,40 @@ def test_live_med_bruger_accepteres(monkeypatch):
     _env(monkeypatch, SBSYS_TOKEN_URL="https://sbsys/token", SBSYS_CLIENT_ID="k",
          SBSYS_USERNAME="svc", SBSYS_PASSWORD="hem")
     _replace(Settings.fra_environment(), dry_run=False).valider()
+
+
+# --- databasens certifikat i prod (20-11-2026) ------------------------------
+# Serveren har et selvsigneret certifikat. Blind tillid er tilladt i prod,
+# men kun som et bevidst tilvalg — og med en advarsel ved hver kørsel.
+
+def _prod(monkeypatch, **ekstra):
+    for navn in ("KONV_DB_TRUST_CERT", "KONV_DB_TRUST_CERT_PROD"):
+        monkeypatch.delenv(navn, raising=False)
+    _env(monkeypatch, KONV_MILJOE="prod", **ekstra)
+
+
+def test_prod_med_blind_tillid_afvises_uden_tilvalg(monkeypatch):
+    _prod(monkeypatch)
+    with pytest.raises(KonfigurationsFejl) as e:
+        Settings.fra_environment().valider()
+    assert "KONV_DB_TRUST_CERT_PROD=1" in str(e.value)
+
+
+def test_prod_med_bevidst_blind_tillid_koerer_med_advarsel(monkeypatch, caplog):
+    _prod(monkeypatch, KONV_DB_TRUST_CERT_PROD="1")
+    s = Settings.fra_environment()
+    s.valider()
+    assert s.db.trust_server_certificate is True
+    assert "verificeres IKKE" in caplog.text
+
+
+def test_prod_med_verificeret_certifikat_behoever_intet_tilvalg(monkeypatch, caplog):
+    _prod(monkeypatch, KONV_DB_TRUST_CERT="0")
+    Settings.fra_environment().valider()
+    assert "verificeres IKKE" not in caplog.text
+
+
+def test_tilvalget_aendrer_intet_i_test(monkeypatch):
+    _env(monkeypatch, KONV_MILJOE="test")
+    monkeypatch.delenv("KONV_DB_TRUST_CERT_PROD", raising=False)
+    Settings.fra_environment().valider()

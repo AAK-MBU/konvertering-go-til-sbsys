@@ -22,8 +22,8 @@ CREATE TABLE stg.sag (
     go_sagsnummer       NVARCHAR(100) NULL,
     titel               NVARCHAR(500) NOT NULL,
     beskrivelse         NVARCHAR(MAX) NULL,
-    kle_go              NVARCHAR(50)  NULL,
-    facet_go            NVARCHAR(50)  NULL,
+    kle_go              NVARCHAR(200) NULL,
+    facet_go            NVARCHAR(200) NULL,
     sagstype_go         NVARCHAR(100) NULL,
     status_go           NVARCHAR(100) NULL,
     ansvarlig_go        NVARCHAR(200) NULL,   -- login/UPN som det står i GO
@@ -51,9 +51,21 @@ IF COL_LENGTH('stg.sag', 'organisering_go') IS NULL
     ALTER TABLE stg.sag ADD organisering_go NVARCHAR(50) NULL;
 GO
 
-IF COL_LENGTH('stg.dokument', 'er_kladde') IS NULL
-    ALTER TABLE stg.dokument ADD er_kladde BIT NOT NULL DEFAULT 0;
+/* KLE og facet udvidet til 200 (27-11-2026): en borgersag havde en KLE paa
+   76 tegn (tekst efter nummeret), og hele extracten fejlede med "String or
+   binary data would be truncated". Vaerdierne sendes ikke til SBSYS
+   (skabelonen saetter KLE og facet) — de staar kun til sporbarhed.
+   COL_LENGTH er i BYTES: NVARCHAR(200) = 400. */
+IF COL_LENGTH('stg.sag', 'kle_go') < 400
+    ALTER TABLE stg.sag ALTER COLUMN kle_go NVARCHAR(200) NULL;
+IF COL_LENGTH('stg.sag', 'facet_go') < 400
+    ALTER TABLE stg.sag ALTER COLUMN facet_go NVARCHAR(200) NULL;
 GO
+
+/* stg.dokument.er_kladde tilfoejes EFTER CREATE TABLE stg.dokument laengere
+   nede. Stod den her, fejlede `konv db init` paa en tom database: COL_LENGTH
+   er NULL naar tabellen ikke findes, og saa forsoegte den at aendre en
+   tabel der endnu ikke var oprettet. */
 
 
 IF OBJECT_ID('stg.part') IS NULL
@@ -104,11 +116,17 @@ CREATE TABLE stg.dokument (
     fil_navn        NVARCHAR(400) NULL,
     fil_stoerrelse  BIGINT        NULL,
     fil_sha256      CHAR(64)      NULL,       -- udfyldes af `konv filer scan`
-    fil_status      VARCHAR(20)   NULL,       -- ok | mangler | tom | laast
+    fil_status      VARCHAR(20)   NULL,       -- ok | mangler | tvetydig | tom | for_stor
     mime            NVARCHAR(150) NULL,
     raa_json        NVARCHAR(MAX) NULL,
     indlaest        DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
 );
+GO
+
+/* Til databaser hvor stg.dokument blev oprettet foer er_kladde fandtes.
+   Staar EFTER CREATE TABLE, saa den aldrig rammer en tabel der ikke findes. */
+IF COL_LENGTH('stg.dokument', 'er_kladde') IS NULL
+    ALTER TABLE stg.dokument ADD er_kladde BIT NOT NULL DEFAULT 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
@@ -163,8 +181,19 @@ WHERE  m.id_map_id IS NULL
    OR  m.status IN ('pending', 'failed');
 GO
 
+/* raekkefoelge: dokumenter og kladder oprettes sag for sag, aeldste
+   foerst, saa SBSYS' standardsortering (senest oprettet oeverst) viser det
+   nyeste dokument oeverst (26-11-2026, som indsatserne):
+     1. Dato     (dokument_dato, GO's Documents.Dato) - tom = aeldst
+     2. Oprettet (registreret, GO's Documents.Oprettet, med klokkeslaet)
+     3. kilde_noegle - goer noeglen unik til sideopdelingen (hent_i_sider).
+   Stil 121 giver altid 'aaaa-mm-dd tt:mm:ss.fff' (fast laengde). */
 CREATE OR ALTER VIEW stg.v_dokumenter_til_indlaesning AS
-SELECT d.*, sm.sbsys_id AS sbsys_sag_id
+SELECT d.*, sm.sbsys_id AS sbsys_sag_id,
+       CAST(d.sag_noegle
+            + '|' + CONVERT(CHAR(23), ISNULL(d.dokument_dato, '19000101'), 121)
+            + '|' + CONVERT(CHAR(23), ISNULL(d.registreret,   '19000101'), 121)
+            + '|' + d.kilde_noegle AS VARCHAR(460)) AS raekkefoelge
 FROM   stg.dokument d
 JOIN   konv.id_map sm                       -- sagen SKAL være indlæst først
        ON  sm.objekt_type = 'sag'
@@ -187,8 +216,12 @@ CREATE TABLE stg.indsats (
     kilde_noegle        VARCHAR(200)  NOT NULL PRIMARY KEY,
     sag_noegle          VARCHAR(200)  NOT NULL,
     boelge              VARCHAR(40)   NULL,
-    /* GO's Ydelse og Bevillingstype — oversaettes til SBSYS' tripel
-       (paragraf, foranstaltning, tilbud) via kodelisterne. */
+    /* Foranstaltningsmappens type (Psykolog, ABA ...). Den bestemmer SBSYS'
+       tripel (paragraf, foranstaltning, tilbud) via kodelisterne — tilbuddet
+       ER mappetypen (konverteringsarket 17-11-2026). */
+    indholdstype_go     NVARCHAR(256) NULL,
+    /* Ydelse og Bevillingstype er almindelige tilbudsfelter (paa hhv. ABA
+       og Stoetteressourcer), ikke tripellet. Gemt til tilbudsfelterne. */
     ydelse_go           NVARCHAR(200) NULL,
     bevillingstype_go   NVARCHAR(200) NULL,
     periode_start       DATETIME2(3)  NULL,
@@ -203,13 +236,38 @@ CREATE TABLE stg.indsats (
 );
 GO
 
+/* Til databaser hvor stg.indsats blev oprettet foer indholdstype_go fandtes.
+   EFTER CREATE TABLE og FOER viewet, som udfolder i.* naar det oprettes. */
+IF COL_LENGTH('stg.indsats', 'indholdstype_go') IS NULL
+    ALTER TABLE stg.indsats ADD indholdstype_go NVARCHAR(256) NULL;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
                WHERE name = 'ix_stg_indsats_sag' AND object_id = OBJECT_ID('stg.indsats'))
 CREATE INDEX ix_stg_indsats_sag ON stg.indsats (sag_noegle);
 GO
 
+/* raekkefoelge: indsatserne oprettes sag for sag i kronologisk orden.
+   SBSYS viser dem i oprettelsesraekkefoelge, og PPR vil have dem kronologisk
+   med nyeste oeverst (25-11-2026). Sorteringen, aeldste foerst:
+     1. startdato (Fra)  - tom = 9999-12-31: en indsats uden startdato er
+                           ikke paabegyndt og skal oprettes SIDST, saa den
+                           ligger oeverst (PPR 25-11-2026). Kun sorteringen;
+                           SBSYS faar stadig 1900-01-01 (FIKTIV_STARTDATO).
+     2. slutdato (Til)   - tom = 9999-12-31: en aaben indsats er den nyeste
+     3. Visiteret        - GO-kolonnen i raa_json; tom = 1900-01-01
+     4. kilde_noegle     - goer noeglen unik, saa sideopdelingen
+                           (hent_i_sider) kan gaa frem efter den. */
 CREATE OR ALTER VIEW stg.v_indsatser_til_indlaesning AS
-SELECT i.*, sm.sbsys_id AS sbsys_sag_id
+SELECT i.*, sm.sbsys_id AS sbsys_sag_id,
+       CAST(i.sag_noegle
+            + '|' + CONVERT(CHAR(8), ISNULL(i.periode_start, '99991231'), 112)
+            + '|' + CONVERT(CHAR(8), ISNULL(i.periode_slut,  '99991231'), 112)
+            + '|' + CONVERT(CHAR(8), ISNULL(COALESCE(
+                        TRY_CONVERT(DATE, LEFT(LTRIM(JSON_VALUE(i.raa_json, '$.Visiteret')), 10), 105),
+                        TRY_CONVERT(DATE, LEFT(LTRIM(JSON_VALUE(i.raa_json, '$.Visiteret')), 10), 23)),
+                    '19000101'), 112)
+            + '|' + i.kilde_noegle AS VARCHAR(440)) AS raekkefoelge
 FROM   stg.indsats i
 JOIN   konv.id_map sm                       -- sagen SKAL vaere indlaest foerst
        ON  sm.objekt_type  = 'sag'

@@ -161,5 +161,5 @@ def test_hver_liste_i_mapping_har_en_kilde():
     leder efter filen."""
     from tests.test_mapping_filer import _lister_i_koden
 
-    mangler = sorted(_lister_i_koden() - set(f.KILDER))
+    mangler = sorted(_lister_i_koden() - set(f.KILDER) - f.HAANDHOLDTE)
     assert not mangler, f"lister uden en kilde i forbered.KILDER: {mangler}"

@@ -8,3 +8,13 @@ sbsys/endpoints.toml
 .ruff_cache/
 
 docs/
+
+soeg-bruger.json
+soeg-kladde.json
+
+# Udtræk fra SBSYS (konv kald ... > fil) og håndlavede testkroppe
+*-prod.txt
+*-test.txt
+indsats-test.json
+*-prod.json
+*-test-liste.json

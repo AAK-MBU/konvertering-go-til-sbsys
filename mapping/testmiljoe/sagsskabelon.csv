@@ -1,0 +1,4 @@
+liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+sagsskabelon;PPR-sag;;2;PPRsag - psykolog;map;TESTMILJØ: Falske testdata (sql/999_testdata.sql). Id/navn fra testmiljøet 16-18/11-2026;;
+sagsskabelon;ABA;;12;PPRsag - ABA;map;TESTMILJØ: Falsk GOStaging (sql/998_gofake_kilde.sql). Id/navn fra testmiljøet 16-18/11-2026;;
+sagsskabelon;Psykolog;;2;PPRsag - psykolog;map;TESTMILJØ: Falsk GOStaging (sql/998_gofake_kilde.sql). Id/navn fra testmiljøet 16-18/11-2026;;

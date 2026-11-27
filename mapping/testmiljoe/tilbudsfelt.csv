@@ -1,0 +1,5 @@
+liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+tilbudsfelt;Psykolog|Indstillingsaarsag;;Indstillingsårsag;Indstillingsårsag;map;TESTMILJØ: Produktion: Indsats. Id/navn fra testmiljøet 16-18/11-2026;;
+tilbudsfelt;ABA|ABAGruppe;;ABA gruppe1;ABA gruppe1;map;TESTMILJØ: Produktion: ABA gruppe. Id/navn fra testmiljøet 16-18/11-2026;;
+tilbudsfelt;ABA|SkoleEllerInstitution;;Institution;Institution;map;TESTMILJØ: Produktion: Skole eller institution. Testmiljøet deler den i Skole og Institution. Id/navn fra testmiljøet 16-18/11-2026;;
+tilbudsfelt;ABA|Betalingssted;;Bevillingssted - Skole;Bevillingssted - Skole;map;TESTMILJØ: Produktion: Bevillingssted. Testmiljøets eneste aktive bevillingsstedfelt på ABA. Id/navn fra testmiljøet 16-18/11-2026;;

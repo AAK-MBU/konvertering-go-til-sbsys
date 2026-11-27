@@ -67,6 +67,8 @@ class Sag(KanoniskObjekt):
     fortrolighed: str | None = None
     bevaring: str | None = None
     primaer_part_noegle: str | None = None
+    # Uden part sendes sagen uden part (emnesager); ellers afvises den.
+    part_valgfri: bool = False
 
     @property
     def objekttype(self) -> Objekttype:
@@ -137,6 +139,9 @@ class Dokument(KanoniskObjekt):
     # journaliseret eller en kladde, og en kladde maa ikke journaliseres:
     # det aendrer dokumentets status i en boernesag.
     er_kladde: bool = False
+    # Kun kladder: GO's oprettelse som tekst i Beskrivelse, fordi en kladde
+    # ikke kan bære dato, opretter eller behandler (26-11-2026).
+    beskrivelse: str | None = None
     fil_sti: str | None = None
     fil_navn: str | None = None
     fil_stoerrelse: int | None = None
@@ -167,6 +172,10 @@ class Indsats(KanoniskObjekt):
     antal_enheder: int | None = None
     enhedstype: str | None = None
     udslagsgivende_forhold: str | None = None
+    # Foranstaltningsmappens type (GO's Indholdstype) og rækkens øvrige
+    # kolonner — kilden til tilbudsfelterne, se tilbudsfelter.py.
+    mappetype: str | None = None
+    go_felter: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def objekttype(self) -> Objekttype:

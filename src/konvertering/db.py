@@ -34,6 +34,27 @@ class SqlScriptFejl(RuntimeError):
         self.aarsag = aarsag
 
 
+def indstil_tegnsaet(forbindelse: Any, pyodbc: Any) -> None:
+    """Danske bogstaver ind og ud af SQL Server — korrekt på Windows OG Linux.
+
+    Tidligere stod alt på UTF-8. På Windows læser ODBC-driveren de bytes som
+    Windows-1252, så alt VI skrev, blev gemt forvansket ("Åben" som
+    "Ã…ben"), og forvanskningen gik ud igen ved læsning. Det så rigtigt ud,
+    indtil der kom ægte data fra GOStaging: "Åben" gav UnicodeDecodeError
+    (20-11-2026, tools/tegnsaet_tjek.py).
+
+    * NVARCHAR (SQL_WCHAR) og al tekst vi SENDER: UTF-16LE — SQL Servers
+      egen Unicode-form. Ingen omkodning undervejs, på nogen platform.
+    * VARCHAR (SQL_CHAR): driveren afleverer i klientens tegnsæt —
+      Windows-1252 på Windows, UTF-8 på Linux — så det er det der læses med.
+    """
+    import locale
+
+    forbindelse.setdecoding(pyodbc.SQL_WCHAR, encoding="utf-16le")
+    forbindelse.setdecoding(pyodbc.SQL_CHAR, encoding=locale.getpreferredencoding(False))
+    forbindelse.setencoding(encoding="utf-16le")
+
+
 class Database:
     def __init__(self, indstillinger: DatabaseIndstillinger) -> None:
         self._i = indstillinger
@@ -47,10 +68,7 @@ class Database:
             timeout=self._i.timeout_sekunder,
             autocommit=False,
         )
-        # Danske tegn og hurtigere fetch af store tekstfelter
-        forbindelse.setdecoding(pyodbc.SQL_CHAR, encoding="utf-8")
-        forbindelse.setdecoding(pyodbc.SQL_WCHAR, encoding="utf-8")
-        forbindelse.setencoding(encoding="utf-8")
+        indstil_tegnsaet(forbindelse, pyodbc)
         return forbindelse
 
     @property
@@ -161,18 +179,22 @@ class Database:
             return markoer.rowcount
 
     def udfoer_mange(self, sql: str, raekker: Sequence[Sequence[Any]],
-                     hurtig: bool = True) -> int:
+                     hurtig: bool = False) -> int:
         """Kør samme sætning for mange rækker. Returnerer berørte rækker.
 
-        ``hurtig=False`` kører én ad gangen. Det er langsommere, men
-        nødvendigt for MERGE: med ``fast_executemany`` binder pyodbc alle
-        parametre efter den FØRSTE rækkes typer og længder, og en MERGE
-        hvis ON-led sammenligner sådan en parameter med en kolonne kan
-        stilfærdigt matche ingenting — ingen fejl, ingen rækker, og et
-        svar der ser vellykket ud.
+        Standard er én række ad gangen, og returværdien er det antal rækker
+        databasen FAKTISK ændrede — så "jeg skrev 16 rækker" ikke kan være
+        usandt.
 
-        Returværdien er antal berørte rækker og ikke antal input-rækker,
-        netop så "jeg skrev 16 rækker" ikke kan være usandt.
+        ``hurtig=True`` bruger pyodbc's ``fast_executemany``. Den er farlig
+        for alt med et WHERE- eller ON-led: pyodbc binder parametrene efter
+        den FØRSTE rækkes typer og længder, og sammenligningen kan
+        stilfærdigt matche ingenting — ingen fejl, ingen rækker. Det er set
+        to gange i dette projekt: en MERGE i ``mapping load``, og 16-11-2026
+        en UPDATE i ``filer scan``, der efterlod fil_status NULL på samtlige
+        dokumenter mens loggen meldte et korrekt resultat. I hurtig tilstand
+        er returværdien derfor bare antallet af input-rækker, IKKE en
+        bekræftelse. Brug den kun til rene INSERT, og kontrollér bagefter.
         """
         if not raekker:
             return 0

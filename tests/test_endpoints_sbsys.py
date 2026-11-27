@@ -187,7 +187,8 @@ def test_id_sendes_som_tal_ikke_streng():
     """Kodelisterne er CSV, saa alt derfra er tekst — men SBSYS' id-felter
     er heltal, og "4711" afvises hvor 4711 accepteres."""
     payload = Endpoints().byg_payload("sag", {"afdeling": "4711"})
-    assert payload["Ansaettelsessted"] == {"AnsaettelsesstedId": 4711}
+    # Ansaettelsessted er en BaseUuidDto {Id, Uuid, Navn} paa CreateSagFromSkabelonDto
+    assert payload["Ansaettelsessted"] == {"Id": 4711}
 
 
 def test_kun_rene_cifre_i_id_felter_omsaettes():
@@ -250,7 +251,7 @@ def test_sag_uden_part_afvises_og_stopper_ikke_boelgen():
 
     kilde = inspect.getsource(sag.SagLoader._part_reference)
     assert "ValideringsFejl" in kilde
-    assert "A16" in kilde
+    assert "mangler_part" in kilde
 
 
 # --- journalnotater ---------------------------------------------------
@@ -274,6 +275,16 @@ def test_notattekst_escapes_som_standard():
     tekst = loader._tekst(SimpleNamespace(tekst="Bor <hos> mor\nog far"))
     assert "&lt;hos&gt;" in tekst
     assert "<br>" in tekst, "linjeskift skal bevares, ellers er notatet ulæseligt"
+
+
+def test_notattekst_windows_linjeskift_giver_rent_br():
+    """GO har \\r\\n. Dry-run 17-11-2026 gav '\\r<br>' — \\r blev hængende."""
+    from types import SimpleNamespace
+
+    from konvertering.loaders.notat import NotatLoader
+
+    loader = NotatLoader(SimpleNamespace(endpoints=Endpoints()))
+    assert loader._tekst(SimpleNamespace(tekst="a\r\nb\rc\nd")) == "a<br>b<br>c<br>d"
 
 
 def test_notattekst_kan_vaere_html_allerede():

@@ -1,1 +1,5 @@
 liste;go_vaerdi;go_tekst;sbsys_vaerdi;sbsys_tekst;handling;kommentar;godkendt_af;godkendt_dato
+dokumentkategori;Indgående;Indgående;1;Indgående;map;GO Documents.DokumentKategori -> SBSYS DokumentArt (prod, konv opslag dokumentarter 26-11-2026). 1:1.;;
+dokumentkategori;Udgående;Udgående;2;Udgående;map;GO Documents.DokumentKategori -> SBSYS DokumentArt (prod, konv opslag dokumentarter 26-11-2026). 1:1.;;
+dokumentkategori;Intern;Intern;3;Internt;map;GO Documents.DokumentKategori -> SBSYS DokumentArt (prod, konv opslag dokumentarter 26-11-2026). GO skriver Intern, SBSYS Internt.;;
+dokumentkategori;Journalnotat;Journalnotat (GO JournalNotes);5;Notat;map;Kategorien saettes af extract - GO's JournalNotes har ingen kategori-kolonne (tjekket 26-11-2026).;;

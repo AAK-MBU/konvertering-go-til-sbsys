@@ -28,7 +28,9 @@ def _lister_i_koden() -> set[str]:
     """Navnene koden faktisk slår op på. Også når kaldet er delt over
     flere linjer — det er netop dér man glemmer at oprette filen."""
     kilde = "\n".join(p.read_text(encoding="utf-8") for p in Path("src").rglob("*.py"))
-    return set(re.findall(r'slaa_op\(\s*"(\w+)"', kilde))
+    # Også lister der slås op via en konstant: FELT_LISTE = "tilbudsfelt"
+    return (set(re.findall(r'slaa_op\(\s*"(\w+)"', kilde))
+            | set(re.findall(r'^\w*_LISTE\s*=\s*"(\w+)"', kilde, re.MULTILINE)))
 
 
 def _lister_i_sql() -> set[str]:
@@ -83,3 +85,40 @@ def test_listenavnet_matcher_filnavnet(sti: Path):
             assert raekke["liste"] == sti.stem, (
                 f"{sti.name}: liste={raekke['liste']!r}, men filen hedder {sti.stem}"
             )
+
+
+@pytest.mark.parametrize("sti", sorted(MAPPE.glob("*.csv")), ids=lambda p: p.stem)
+def test_hver_raekke_har_lige_mange_felter(sti: Path):
+    """Et semikolon i en kommentar flytter resten af rækken én kolonne til
+    højre. `mapping load` fejlede 17-11-2026 med "String or binary data
+    would be truncated", fordi kommentarteksten landede i godkendt_af."""
+    with sti.open(encoding="utf-8-sig", newline="") as f:
+        forkerte = [nr for nr, r in enumerate(csv.reader(f, delimiter=";"), 1)
+                    if r and len(r) != len(KOLONNER)]
+    assert not forkerte, (
+        f"{sti.name}: linje {forkerte[:5]} har ikke {len(KOLONNER)} felter — "
+        f"står der et semikolon i en tekst?")
+
+
+# --- testmiljøets afvigelser (mapping/testmiljoe/) -----------------------
+
+TESTFILER = sorted((MAPPE / "testmiljoe").glob("*.csv"))
+
+
+@pytest.mark.parametrize("sti", TESTFILER, ids=lambda p: p.stem)
+def test_testfilerne_har_samme_form(sti: Path):
+    with sti.open(encoding="utf-8-sig", newline="") as f:
+        raekker = list(csv.reader(f, delimiter=";"))
+    assert raekker[0] == KOLONNER
+    assert all(len(r) == len(KOLONNER) for r in raekker if r)
+    assert all(r[0] == sti.stem for r in raekker[1:] if r)
+
+
+@pytest.mark.parametrize("sti", TESTFILER, ids=lambda p: p.stem)
+def test_testfilerne_overstyrer_kun_eksisterende_lister(sti: Path):
+    """En testfil til en liste produktionen ikke har, er en stavefejl."""
+    assert (MAPPE / sti.name).exists(), f"mapping/{sti.name} findes ikke"
+
+
+def test_der_er_testfiler():
+    assert TESTFILER, "mapping/testmiljoe/ er tom eller væk"

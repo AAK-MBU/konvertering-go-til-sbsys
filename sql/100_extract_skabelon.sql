@@ -21,14 +21,17 @@
   stagingdatabasens egne loebenumre. De aendrer sig ved naeste indlaesning
   og maa ALDRIG bruges som kilde_noegle.
 
-    stg.sag       Cases.GOSagsID            nvarchar(36), en GUID. Stabil
-                                            (bekraeftet af NC 11-11-2026)
+    stg.sag       Cases.GOSagsID            nvarchar(36), GO's sagsnummer
+                                            (fx PPR-2015-123456-001). Stabil
+                                            (bekraeftet af NC 11-11-2026), og
+                                            OGSAA mappenavnet paa fileshare'et
+                                            (bekraeftet 16-11-2026)
     stg.dokument  Documents.DokumentID      GO's eget dokument-id
     stg.notat     JournalNotes.DokumentID   GO's eget id
     stg.part      CPR eller CVR             Contacts har INGEN stabil egen
                                             noegle — se afsnit 3
-    stg.indsats   sammensat                 Foranstaltningsdata har heller
-                                            ingen — se afsnit 5
+    stg.indsats   SagsId + fingeraftryk     Foranstaltningsdata har heller
+                  af hele raekken + nr.     ingen — se afsnit 6
 
   ---------------------------------------------------------------------
   TRE FUND DER AENDRER ANTAGELSER
@@ -39,9 +42,10 @@
      de lander i stg.dokument med praefikset 'JN:' paa noeglen og
      kategorien 'Journalnotat'. stg.notat fyldes ikke laengere.
 
-  2) GOWorkflows ER OGSAA DOKUMENTER.
-     Samme form som JournalNotes, og det er .txt-filer der skal paa
-     sagen som dokumenter (B12, besvaret 11-11-2026). Praefiks 'WF:'.
+  2) GOWorkflows KONVERTERES IKKE.
+     B12 (11-11-2026) sagde dokumenter med praefiks 'WF:', men det er
+     omgjort 26-11-2026 efter aftale med en sagsbehandler: SBSYS har intet
+     workflow-begreb, og filerne skal ikke med. Tabellen laeses ikke.
 
   3) CHECKSUMMER FINDES ALLEREDE.
      Documents.SHACheckSum, JournalNotes.SHACheckSum og DocumentSHA.
@@ -51,6 +55,14 @@
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+
+/* SORTERINGSREGLER (collation). GOStaging og SBSYS_KONV har forskellige
+   (den ene Danish_Norwegian_CI_AS, den anden SQL_Danish_Pref_CP1_CI_AS). Hver gang en
+   GOStaging-kolonne sammenlignes med en kolonne i stg, skal der staa
+   COLLATE DATABASE_DEFAULT paa GOStaging-siden — ellers Msg 468 "Cannot
+   resolve the collation conflict". Fundet 18-11-2026 ved simulering mod
+   en falsk GOStaging (sql/998_gofake_kilde.sql), hvis tabeller har
+   GOStaging's sorteringsregler. test_extract holder fast i det. */
 
 /* ================================================================== */
 /* 1) Sager                                                            */
@@ -67,7 +79,7 @@ INSERT INTO stg.sag (
     primaer_part_noegle, raa_json
 )
 SELECT
-    c.[GOSagsID],                     -- GUID, stabil. IKKE c.ID
+    c.[GOSagsID],                     -- sagsnummeret, stabilt. IKKE c.ID
     c.[GOSagsID],                     -- GO har intet separat sagsnummer
     LEFT(NULLIF(LTRIM(RTRIM(c.[Sagsnavn])), N''), 500),
     c.[KLE],
@@ -200,15 +212,25 @@ FROM (
 ) AS k
 GROUP  BY k.noegle, k.cpr, k.cvr;
 
-/* Relationen. Noeglen er sag + part, saa den er stabil og idempotent. */
+/* Relationen. Noeglen er sag + part, saa den er stabil og idempotent.
+
+   ÉN raekke pr. sag + part. Barnet staar baade som primaer part paa Cases
+   OG ofte blandt sagens Contacts — to raekker med forskellig rolle, og
+   DISTINCT slog dem ikke sammen: PK-brud paa den foerste rigtige sag
+   (20-11-2026). Den primaere rolle vinder; ellers den foerste rolle i
+   alfabetisk orden, saa resultatet er det samme hver gang. */
 INSERT INTO stg.sag_part (kilde_noegle, sag_noegle, part_noegle, rolle_go, primaer)
-SELECT DISTINCT
+SELECT
     r.sag_noegle + '|' + r.part_noegle,
     r.sag_noegle,
     r.part_noegle,
     r.rolle,
     r.primaer
 FROM (
+  SELECT r.*,
+         nr = ROW_NUMBER() OVER (PARTITION BY r.sag_noegle, r.part_noegle
+                                 ORDER BY r.primaer DESC, r.rolle)
+  FROM (
     SELECT sag_noegle  = c.[GOSagsID],
            part_noegle = NULLIF(LTRIM(RTRIM(c.[CPR])), N''),
            rolle       = N'Primær part',
@@ -226,9 +248,11 @@ FROM (
     FROM   GOStaging.dbo.[Contacts] AS k
     WHERE  COALESCE(NULLIF(LTRIM(RTRIM(k.[CPR])), N''),
                     NULLIF(LTRIM(RTRIM(k.[CVR])), N'')) IS NOT NULL
+  ) AS r
 ) AS r
-WHERE  EXISTS (SELECT 1 FROM stg.part p WHERE p.kilde_noegle = r.part_noegle)
-  AND  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = r.sag_noegle);
+WHERE  r.nr = 1
+  AND  EXISTS (SELECT 1 FROM stg.part p WHERE p.kilde_noegle = r.part_noegle COLLATE DATABASE_DEFAULT)
+  AND  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = r.sag_noegle COLLATE DATABASE_DEFAULT);
 
 /* ================================================================== */
 /* 4) Dokumenter                                                       */
@@ -247,7 +271,9 @@ SELECT
     d.[DokumentKategori],
     TRY_CONVERT(DATETIME2(3), d.[Dato]),
     TRY_CONVERT(DATETIME2(3), d.[Oprettet]),
-    COALESCE(d.[DokumentAnsvarlig], d.[OprettetAf]),
+    /* PPR 25-11-2026: "Oprettet af" skal vaere den faktiske opretter i GO,
+       ikke den ansvarlige. Ansvarlig kun hvis OprettetAf er tom. */
+    COALESCE(NULLIF(LTRIM(RTRIM(d.[OprettetAf])), N''), d.[DokumentAnsvarlig]),
     /* A21 besvaret 11-11-2026: GO har ikke et ind-/udgaaende-begreb.
        Forskellen paa et dokument i SBSYS er journaliseret vs. kladde,
        og den baeres af er_kladde nedenfor. */
@@ -259,14 +285,24 @@ SELECT
        Et dokument der er kladde i GO, skal vaere kladde i SBSYS — ikke
        journaliseret, og ikke udeladt. */
     CASE WHEN d.[Journaliseret] = 1 THEN 0 ELSE 1 END,
-    /* Komplet relativ sti. FilOpslag.find() laegger roden foran og
-       forventer en sti TIL FILEN — ikke til mappen. Er mappen tom,
-       staar filnavnet alene, og indeksopslaget er sidste udvej. */
-    CASE
-        WHEN NULLIF(LTRIM(RTRIM(d.[Mappestruktur])), N'') IS NULL THEN d.[Filnavn]
-        WHEN d.[Filnavn] IS NULL THEN d.[Mappestruktur]
-        ELSE LTRIM(RTRIM(d.[Mappestruktur])) + N'\' + d.[Filnavn]
-    END,
+    /* Sti paa fileshare'et, relativ til KONV_FIL_ROD (\\<server>\GO_Files):
+           <SagsId>/<DokumentID>.<endelse>
+       Bekraeftet 16-11-2026 mod testdumpet: mappen hedder sagens GOSagsID
+       (fx PPR-2015-123456-001), og filen hedder dokument-id'et med
+       endelsen fra GO's oprindelige filnavn. Mappestruktur er tom for alle
+       dokumenter og bruges ikke.
+
+       Overloebsmapper (<SagsId>_1, _2 ved over 1000 filer) og endelsens
+       store/smaa bogstaver haandteres af FilOpslag, ikke her: hvilken
+       mappe filen ligger i, kan kun filsystemet svare paa. Har Filnavn
+       ingen endelse, staar dokument-id'et alene, og FilOpslag leder efter
+       <DokumentID>.* i stedet. */
+    d.[SagsId] + N'/' + CONVERT(NVARCHAR(20), d.[DokumentID])
+        + CASE WHEN CHARINDEX(N'.', REVERSE(d.[Filnavn])) > 1
+               THEN RIGHT(d.[Filnavn], CHARINDEX(N'.', REVERSE(d.[Filnavn])))
+               ELSE N'' END,
+    /* GO's oprindelige filnavn — det sagsbehandleren ser i SBSYS. Det er
+       IKKE navnet paa disken. */
     d.[Filnavn],
     d.[Filstoerrelse],
     /* Checksum FRA KILDEN. `konv filer scan` skal ikke beregne den igen;
@@ -274,7 +310,7 @@ SELECT
     NULLIF(LTRIM(RTRIM(d.[SHACheckSum])), N''),
     (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
 FROM   GOStaging.dbo.[Documents] AS d
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId]);
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* Checksummer der staar i DocumentSHA frem for paa dokumentet selv. */
 UPDATE d
@@ -332,127 +368,144 @@ SELECT
     1,
     1,
     0,
-    /* ScpFolder + DokumentID. Filnavnet staar i id-kolonnen. */
-    CASE
-        WHEN NULLIF(LTRIM(RTRIM(n.[ScpFolder])), N'') IS NULL THEN n.[DokumentID]
-        ELSE LTRIM(RTRIM(n.[ScpFolder])) + N'\' + n.[DokumentID]
-    END,
+    /* <SagsId>/<DokumentID>, som for de oevrige dokumenter. Filnavnet staar
+       i id-kolonnen. ScpFolder er '/GO_Files/<SagsId>' (bekraeftet 16/16
+       mod testdumpet 16-11-2026) — men med '/GO_Files/' foran ville stien
+       blive ...\GO_Files\GO_Files\..., fordi KONV_FIL_ROD allerede er
+       GO_Files. Derfor bygges stien af SagsId og ikke af ScpFolder. */
+    n.[SagsId] + N'/' + n.[DokumentID],
     n.[DokumentID],
     NULLIF(LTRIM(RTRIM(n.[SHACheckSum])), N''),
     (SELECT n.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
 FROM   GOStaging.dbo.[JournalNotes] AS n
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId]);
-
-/* ================================================================== */
-/* 5b) Workflows — ogsaa dokumenter                                    */
-/* ================================================================== */
-/*
-  B12 besvaret 11-11-2026: GOWorkflows er .txt-filer der skal paa sagen
-  som dokumenter, praecis som journalnotaterne. Samme form i kilden
-  (DokumentID = filnavn, ScpFolder = mappe), samme behandling her.
-
-  Praefikset er 'WF:'. Tre navnerum i samme tabel — heltal fra Documents,
-  'JN:' fra journalnotater, 'WF:' herfra — og ingen af dem kan kollidere.
-*/
-INSERT INTO stg.dokument (
-    kilde_noegle, sag_noegle, titel, kategori_go, dokument_dato,
-    retning, version, er_hoved_dok, er_kladde,
-    fil_relativ_sti, fil_navn, fil_sha256, raa_json
-)
-SELECT
-    'WF:' + CONVERT(VARCHAR(196), w.[DokumentID]),
-    w.[SagsId],
-    LEFT(COALESCE(NULLIF(LTRIM(RTRIM(w.[DokumentTitel])), N''),
-                  w.[DokumentID]), 500),
-    N'Workflow',
-    TRY_CONVERT(DATETIME2(3), w.[Dato]),
-    'internt',
-    1,
-    1,
-    0,
-    CASE
-        WHEN NULLIF(LTRIM(RTRIM(w.[ScpFolder])), N'') IS NULL THEN w.[DokumentID]
-        ELSE LTRIM(RTRIM(w.[ScpFolder])) + N'\' + w.[DokumentID]
-    END,
-    w.[DokumentID],
-    NULLIF(LTRIM(RTRIM(w.[SHACheckSum])), N''),
-    (SELECT w.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
-FROM   GOStaging.dbo.[GOWorkflows] AS w
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId]);
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* ================================================================== */
 /* 6) Indsatser                                                        */
 /* ================================================================== */
 /*
-  Foranstaltningsdata.ID er IDENTITY og ubrugelig som noegle. Der er
-  ingen anden kandidat i tabellen, saa noeglen SAMMENSAETTES af de felter
-  der goer raekken unik: sag + indholdstype + ydelse + periodestart.
+  Foranstaltningsdata.ID er IDENTITY og ubrugelig som noegle — den
+  nummereres om ved hvert dump. Der er ingen anden kandidat i tabellen.
 
-  Det er svagere end en GUID. To indsatser paa samme sag med samme ydelse
-  og samme startdato ville kollidere — og en kollision her betyder at den
-  ene indsats forsvinder lydloest. Derfor taelles dubletter FOER
-  indlaesningen, og kørslen stopper hvis der er nogen. Se B14.
+  Noeglen er derfor:   <SagsId>|<fingeraftryk>|<n>
 
-  Datoerne Fra og Til er nvarchar(256), ikke datoer. TRY_CONVERT giver
-  NULL paa det der ikke kan tolkes, og de raekker fanges af
-  ValideringsFejl 'mangler_periode' i loaderen frem for at blive gaettet.
+  * fingeraftryk = SHA-256 af ALLE raekkens kolonner undtagen ID og SagsId.
+    To raekker der adskiller sig i bare ét felt, faar hver sin noegle.
+  * n nummererer raekker der er ens i ALLE felter (aegte dubletter i GO).
+    Det er ligegyldigt hvilken der bliver 1 og 2 — de er ens.
+
+  Hvorfor ikke sag+type+ydelse+fra som foer? Profileringen af testdumpet
+  (sql/105, 17-11-2026) viste 63 raekker der delte den noegle med en anden.
+  De blev udeladt af stg.indsats. Selv med alle ABA-felter i noeglen
+  kolliderede 26, og 16 raekker var ens i ALT.
+
+  Ulempen: aendres et felt i GO mellem to dumps, faar raekken en ny noegle,
+  og den gamle indsats i SBSYS kendes ikke igen. Det gjaldt ogsaa den gamle
+  noegle (en rettet Fra-dato), og den rigtige konvertering koeres paa ét
+  dump. Kolonnelisten staar eksplicit: mangler en kolonne i et senere dump,
+  skal extract fejle hoejlydt frem for at regne et andet fingeraftryk.
+
+  COALESCE(N'1' + x, N'0') skelner NULL fra tom tekst; NCHAR(31) (unit
+  separator) skiller felterne. CONCAT og ikke CONCAT_WS, som kraever
+  SQL Server 2017, saa 'ab'+'c' ikke bliver 'a'+'bc'.
+
+  AABENT (17-11-2026): skal aegte dubletter blive til én indsats eller to?
+  Indtil det er afgjort, kommer alle med — der tabes intet.
+
+  Datoerne Fra og Til er nvarchar(256) i formatet dd-mm-aaaa (bekraeftet
+  16-11 og 17-11-2026: 1777 Fra, 1472 Til, 1590 Visiteret, ingen afvigere).
+  Formatet SKAL angives (stil 105): serveren er us_english/mdy, og uden
+  stil bliver 05-03-2021 lydloest til 3. maj.
+
+  En tom Fra-dato er IKKE en fejl her. Konverteringsarket siger at den
+  skal blive 1900-01-01; det goer loaderen, saa stg.indsats viser sandheden.
 */
 DELETE FROM stg.indsats;
 
 ;WITH kandidater AS (
     SELECT
-        noegle = CONVERT(VARCHAR(200),
-                     f.[SagsId] + '|' + COALESCE(f.[Indholdstype], N'')
-                               + '|' + COALESCE(f.[Ydelse], N'')
-                               + '|' + COALESCE(CONVERT(VARCHAR(10),
-                                          TRY_CONVERT(DATE, f.[Fra]), 23), N'')),
+        fingeraftryk = CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', CONCAT(
+                COALESCE(N'1' + f.[Indholdstype], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Visiteret], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Fra], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Til], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Sagsbehandler], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[ABAGruppe], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Ydelse], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[SkoleEllerInstitution], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Betalingssted], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Timer], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[VisiteretTilTilbud], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Visitationsteam], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Specialundervisningstilbud], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[TypeAfEnkelteIntegration], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Betalingskommune], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Skoleaar], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Faggruppe], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Indsats], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Institutionsnavn], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Aarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[HenvisningsAarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Klassetrin], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Klassebetegnelse], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Skole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[NavnPaaSkole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bopaelsoplysning], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[AndenBetalingskommune], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[EkstraBevilling], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[IndstilletAf], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Indstillingsaarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Aktivitet], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[BetegnelseSpecialklasse], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[FritSkolevalg], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[NavnPaaSpecialskole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[BetegnelseSpecialskole], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bevillingstype], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Institutionstype], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bevillingssted], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Bevillingsaarsag], N'0'), NCHAR(31),
+                COALESCE(N'1' + f.[Emneliste], N'0')
+        )), 2),
         f.*
     FROM GOStaging.dbo.[Foranstaltningsdata] AS f
+),
+nummereret AS (
+    SELECT
+        noegle = CONVERT(VARCHAR(200),
+                     k.[SagsId] + '|' + k.fingeraftryk + '|'
+                     + CONVERT(VARCHAR(10), ROW_NUMBER() OVER (
+                           PARTITION BY k.[SagsId], k.fingeraftryk ORDER BY k.[ID]))),
+        k.*
+    FROM kandidater AS k
 )
 INSERT INTO stg.indsats (
-    kilde_noegle, sag_noegle, ydelse_go, bevillingstype_go,
+    kilde_noegle, sag_noegle, indholdstype_go, ydelse_go, bevillingstype_go,
     periode_start, periode_slut, enhedstype_go, udslagsgivende_go, raa_json
 )
 SELECT
-    k.noegle,
-    k.[SagsId],
-    k.[Ydelse],
-    k.[Bevillingstype],
-    TRY_CONVERT(DATETIME2(3), k.[Fra]),
-    TRY_CONVERT(DATETIME2(3), k.[Til]),
-    /* Timer er fritekst ("4 timer ugentligt"). Antal og enhed kan ikke
-       udledes forsvarligt, og et gaet her bliver til en bevilling.
-       Lades tom indtil E2b er afklaret; vaerdien er bevaret i raa_json. */
+    n.noegle,
+    n.[SagsId],
+    n.[Indholdstype],
+    n.[Ydelse],
+    n.[Bevillingstype],
+    TRY_CONVERT(DATETIME2(3), n.[Fra], 105),
+    TRY_CONVERT(DATETIME2(3), n.[Til], 105),
+    /* Timer staar som timer:minutter ("7:30"). Om 4:45 er 4,75 eller 4,45
+       timer, er ikke afgjort (17-11-2026). Lades tom; vaerdien er bevaret
+       i raa_json. */
     NULL,
-    COALESCE(k.[HenvisningsAarsag], k.[Aarsag]),
-    (SELECT k.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
-FROM   kandidater AS k
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = k.[SagsId])
-  AND  k.noegle IN (
-        SELECT noegle FROM kandidater GROUP BY noegle HAVING COUNT(*) = 1
-  );
+    COALESCE(n.[HenvisningsAarsag], n.[Aarsag]),
+    (SELECT n.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
+FROM   nummereret AS n
+WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT);
 
-/* Kollisioner: raekker der IKKE kom med, fordi den sammensatte noegle
-   ramte mere end én. De er ikke tabt — de er udeladt med vilje, og de
-   skal ses af et menneske. */
-IF EXISTS (
-    SELECT 1 FROM GOStaging.dbo.[Foranstaltningsdata] f
-    GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra])
-    HAVING COUNT(*) > 1
-)
-BEGIN
-    DECLARE @dubletter INT = (
-        SELECT COUNT(*) FROM (
-            SELECT 1 AS x FROM GOStaging.dbo.[Foranstaltningsdata] f
-            GROUP BY f.[SagsId], f.[Indholdstype], f.[Ydelse], TRY_CONVERT(DATE, f.[Fra])
-            HAVING COUNT(*) > 1
-        ) AS d);
-    RAISERROR(
-        'Foranstaltningsdata: %d noeglekollisioner. Den sammensatte noegle '
-        '(sag+indholdstype+ydelse+fra) er ikke unik. Indsatserne er IKKE '
-        'indlaest. Se B14 i docs/04-aabne-spoergsmaal.md.',
-        16, 1, @dubletter);
-END
+/* Til orientering: hvor mange aegte dubletter kom med som nr. 2, 3 ... */
+DECLARE @aegte_dubletter INT =
+    (SELECT COUNT(*) FROM stg.indsats WHERE kilde_noegle NOT LIKE '%|1');
+IF @aegte_dubletter > 0
+    PRINT N'Foranstaltningsdata: ' + CONVERT(NVARCHAR(10), @aegte_dubletter)
+        + N' raekker er ens i ALLE felter med en anden paa samme sag. '
+        + N'De er kommet med som selvstaendige indsatser (se kommentaren ovenfor).';
 
 /* ================================================================== */
 /* 7) Boelgen arves nedad                                              */
@@ -482,9 +535,10 @@ USING (
     UNION SELECT DISTINCT 'bruger',          ansvarlig_go  FROM stg.sag      WHERE ansvarlig_go IS NOT NULL
     UNION SELECT DISTINCT 'afdeling',        afdeling_go   FROM stg.sag      WHERE afdeling_go IS NOT NULL
     UNION SELECT DISTINCT 'dokumentkategori', kategori_go  FROM stg.dokument WHERE kategori_go IS NOT NULL
-    UNION SELECT DISTINCT 'paragraf',        bevillingstype_go FROM stg.indsats WHERE bevillingstype_go IS NOT NULL
-    UNION SELECT DISTINCT 'foranstaltning',  ydelse_go     FROM stg.indsats  WHERE ydelse_go IS NOT NULL
-    UNION SELECT DISTINCT 'tilbud',          ydelse_go     FROM stg.indsats  WHERE ydelse_go IS NOT NULL
+    /* Indsatsens tripel slaas alle tre op paa mappetypen */
+    UNION SELECT DISTINCT 'paragraf',        indholdstype_go FROM stg.indsats WHERE indholdstype_go IS NOT NULL
+    UNION SELECT DISTINCT 'foranstaltning',  indholdstype_go FROM stg.indsats WHERE indholdstype_go IS NOT NULL
+    UNION SELECT DISTINCT 'tilbud',          indholdstype_go FROM stg.indsats WHERE indholdstype_go IS NOT NULL
     UNION SELECT DISTINCT 'udslagsgivende_forhold', udslagsgivende_go FROM stg.indsats WHERE udslagsgivende_go IS NOT NULL
     /* Boelgetildelingen: omraadet, og enheden for ELM's seks */
     UNION SELECT DISTINCT 'boelge',          organisering_go FROM stg.sag    WHERE organisering_go IS NOT NULL
@@ -508,8 +562,6 @@ UNION ALL SELECT 'Indlaest', 'sag_part', COUNT(*) FROM stg.sag_part
 UNION ALL SELECT 'Indlaest', 'dokument', COUNT(*) FROM stg.dokument
 UNION ALL SELECT 'Indlaest', 'heraf journalnotat',
        COUNT(*) FROM stg.dokument WHERE kilde_noegle LIKE 'JN:%'
-UNION ALL SELECT 'Indlaest', 'heraf workflow',
-       COUNT(*) FROM stg.dokument WHERE kilde_noegle LIKE 'WF:%'
 UNION ALL SELECT 'Indlaest', 'heraf kladde',
        COUNT(*) FROM stg.dokument WHERE er_kladde = 1
 UNION ALL SELECT 'Indlaest', 'notat (forventet 0)', COUNT(*) FROM stg.notat
@@ -525,15 +577,11 @@ ORDER  BY COUNT(*) DESC;
 /* Rækker der blev valgt fra, fordi sagen ikke fandtes. */
 SELECT 'Forældreloese' AS afsnit, 'dokument' AS kilde, COUNT(*) AS antal
 FROM   GOStaging.dbo.[Documents] d
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId])
+WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId] COLLATE DATABASE_DEFAULT)
 UNION ALL
 SELECT 'Forældreloese', 'journalnotat', COUNT(*)
 FROM   GOStaging.dbo.[JournalNotes] n
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId])
-UNION ALL
-SELECT 'Forældreloese', 'workflow', COUNT(*)
-FROM   GOStaging.dbo.[GOWorkflows] w
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId]);
+WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* Journalnotater uden en sti: de kan ikke findes paa fileshare. */
 SELECT 'Journalnotat uden sti' AS afsnit, COUNT(*) AS antal

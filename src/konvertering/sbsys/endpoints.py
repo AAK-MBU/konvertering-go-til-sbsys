@@ -60,6 +60,10 @@ STANDARD_OPERATIONER: dict[str, Operation] = {
     "opret_sag":        Operation("POST", "/api/sag/template", (200, 201)),       # [k]
     # Og de opdateres kun ved at sende hele sagen retur. Hent først.
     "opdater_sag":      Operation("PUT",  "/api/sag/{sag_id}", (200, 204)),       # [k]
+    # Status kan IKKE saettes ved oprettelse — CreateSagFromSkabelonDto har
+    # intet statusfelt. Den saettes bagefter med SagsStatusModel
+    # {SagsStatusID, Kommentar}. Fra SBSYS' OpenAPI-beskrivelse 16-11-2026.
+    "opdater_sagsstatus": Operation("PUT", "/api/sag/{sag_id}/status", (200, 204)),  # [s]
     "soeg_person":      Operation("POST", "/api/person/search", (200,)),          # [k]
     "soeg_firma":       Operation("POST", "/api/firma/search", (200,)),           # [k]
     "soeg_bruger":      Operation("POST", "/api/bruger/search", (200,)),          # [k]
@@ -92,9 +96,15 @@ STANDARD_OPERATIONER: dict[str, Operation] = {
     # svarer altsaa med noget helt andet end det man tror.
     "hent_sag_indsatser": Operation(                                                   # [v]
         "GET", "/bu_api/sag/{sag_id}/sag_foranstaltninger", (200, 204, 404)),
-    # Tilbudsfelter: et tilbud kan have egne felter, og vaerdierne saettes
-    # i et SELVSTAENDIGT kald EFTER indsatsen findes. Se A19.
+    # Tilbudsfelter: et tilbud har sine egne felter. Vaerdierne sendes I
+    # OPRETTELSEN som feltVaerdier (testmiljoeet 18-11-2026) — et
+    # obligatorisk felt kan ikke udfyldes bagefter. Se tilbudsfelter.py.
     "hent_tilbudfelter": Operation("GET", "/bu_api/tilbud/{tilbud_id}/tilbudfelt", (200,)),    # [v]
+    "hent_tilbudfelttyper": Operation("GET", "/bu_api/tilbudfelttype", (200,)),                # [v]
+    "hent_vaerdilistemuligheder": Operation(
+        "GET", "/bu_api/tilbudfeltvaerdiliste/{liste_id}/tilbudfeltvaerdilistemulighed", (200,)),  # [v]
+    "hent_eksterne_muligheder": Operation(
+        "GET", "/bu_api/externalreference/tilbudfeltvaerdilistemulighed", (200,)),         # [v]
     "opret_tilbudfeltvaerdi": Operation(
         "POST", "/bu_api/sag_foranstaltning/{indsats_id}/tilbudfeltvaerdi", (200, 201)),       # [v]
     # Livstegn paa BU-vaerten. Bemaerk /api/, ikke /bu_api/.
@@ -106,46 +116,74 @@ STANDARD_OPERATIONER: dict[str, Operation] = {
     # Samme sti som hent_version, men et andet formaal: livstegn er ikke
     # en kodeliste, og det skal kunne laeses i koden hvad kaldet skal.
     "hent_statusser":   Operation("GET",  "/api/sag/sagStatusList", (200,)),      # [k]
+    # Dokumentarter — kilden til mapping/dokumentkategori.csv. Journaliseringen
+    # peger paa arten med et objekt: DokumentArt {Id}.
+    "hent_dokumentarter": Operation("GET", "/api/dokumentarter/alle", (200,)),    # [s]
 }
 
 # Kanonisk feltnavn -> SBSYS feltnavn.
-# `ekstern_noegle` er afgørende: det er her GO-nøglen skrives med, så et
-# objekt kan genfindes hvis id_map og SBSYS kommer ud af trit.
+#
+# Revideret 16-11-2026 mod SBSYS' egen OpenAPI-beskrivelse
+# (rapporter/sbsys-spec.json). Mærkningen [s] betyder "står i
+# beskrivelsen" — bekræftet på papiret, men endnu ikke af et rigtigt kald.
+# Indtil da sendte vi fire sagsfelter oprettelsen ikke kender (SagsNummer,
+# SagsStatusId, SagsDato, SagsTypeId). Attrappen tager imod alt, så det
+# viste sig først da payloaden blev læst op mod modellen.
 STANDARD_FELTER: dict[str, dict[str, str]] = {
     "sag": {
-        # SBSYS kalder titlen SagsTitel ved oprettelse og soegning, men
-        # Titel ved laesning. Her skrives, saa SagsTitel.
-        "titel": "SagsTitel",
-        "beskrivelse": "Beskrivelse",         # TODO
-        "kle": "SagsNummer",                  # TODO
-        "facet": "Facet",                     # TODO
-        "sagstype": "SagsTypeId",             # TODO
-        "status": "SagsStatusId",             # TODO
-        # Bekraeftet 02-11-2026: ansaettelsesstedet peges paa ved reference,
-        # ikke ved vaerdi — ExternalAnsaettelsesstedreferenceDto har
-        # {AnsaettelsesstedId, ExternalKey}. Punktummet giver et indlejret
-        # objekt; se byg_payload.
-        "ansvarlig": "SagsBehandlerID",
-        # Bekraeftet 02-11-2026: alle 15 ansaettelsessteder i Aarhus' testmiljoe
-        # har TOM ExternalKey, saa der kan ikke peges paa dem med ekstern
-        # noegle. mapping/afdeling.csv skal give AnsaettelsesstedId.
-        "afdeling": "Ansaettelsessted.AnsaettelsesstedId",
-        "skabelon": "SkabelonId",
-        "oprettet_dato": "SagsDato",          # TODO
-        "afsluttet_dato": "Afsluttetdato",    # TODO
-        # Skabelonen kraever parter. Begge skal med: PrimaryPart er den
-        # sagen handler om, Parts er listen af alle tilknyttede.
-        "primaer_part": "PrimaryPart",
-        "parter": "Parts",
-        "ekstern_noegle": "EksternSagId",     # soegbar; se A17/A18
+        # CreateSagFromSkabelonDto — POST /api/sag/template. Modellen har
+        # KUN: SagsTitel, SkabelonId, SagsBehandlerID, Ansaettelsessted,
+        # AnsaettelsesStedCode, EmneplanNummer, Facet, FagomraadeID,
+        # StyringsReolID, PrimaryPart, Parts, SagsRoller, Genstande.
+        # Status, datoer, beskrivelse og sagstype kan IKKE sendes her:
+        # status saettes bagefter (feltgruppen "sagsstatus"), sagstypen
+        # kommer fra skabelonen, og de historiske datoer er spoergsmaal A2.
+        "titel": "SagsTitel",                 # [s]
+        "kle": "EmneplanNummer",              # [s] string, fx "17.01.05"
+        "facet": "Facet",                     # [s] string
+        "ansvarlig": "SagsBehandlerID",       # [s] int
+        # Ansaettelsessted er en BaseUuidDto {Id, Uuid, Navn} paa denne
+        # model — IKKE ExternalAnsaettelsesstedreferenceDto, som hoerer til
+        # et andet endpoint. Vaerdien i mapping/afdeling.csv er derfor Id'et.
+        "afdeling": "Ansaettelsessted.Id",    # [s]
+        "skabelon": "SkabelonId",             # [s] int
+        # Skabelonen kraever parter. PrimaryPart er den sagen handler om,
+        # Parts listen af alle tilknyttede. PartDto {PartId, PartType}.
+        "primaer_part": "PrimaryPart",        # [s]
+        "parter": "Parts",                    # [s]
+        # Udfyldes IKKE (besluttet 11-11-2026), men feltet findes i soegningen.
+        "ekstern_noegle": "EksternSagId",
+    },
+    "sagsstatus": {
+        # SagsStatusModel — PUT /api/sag/{id}/status, efter oprettelsen.
+        # Bemaerk ID med stort D, i modsaetning til SagsBehandlerID's mønster
+        # andre steder. Saadan staar det i modellen.
+        "status": "SagsStatusID",             # [s] int
+        "kommentar": "Kommentar",             # [s]
+    },
+    "sagssoegning": {
+        # SagSearchQueryV29 — POST /api/sag/search. Soegningen hedder Titel,
+        # ikke SagsTitel, og parten angives med CPR/CVR, ikke med PartId.
+        "titel": "Titel",                     # [s]
+        "primaer_person": "PrimaerPerson.CprNummer",   # [s] "DDMMYY-NNNN"
+        "primaert_firma": "PrimaertFirma.CvrNummer",   # [s]
     },
     "dokument": {
-        "titel": "DokumentNavn",
-        "kategori": "DokumentTypeId",         # TODO
-        "dokument_dato": "DokumentDato",      # TODO
-        "retning": "Kategori",                # TODO
-        "forfatter": "OprettetAfId",          # TODO
+        # JournaliserDokumentInputDtoV10 — feltet "json" i POST
+        # /api/dokument/journaliser. SagID tilfoejes af loaderen.
+        "titel": "DokumentNavn",              # [s]
+        # DokumentArtDto {Id, Uuid, Navn}. Id'et fra mapping/dokumentkategori.csv,
+        # hentet med `konv opslag dokumentarter`.
+        "kategori": "DokumentArt.Id",         # [s]
+        # Modellen har kun én dato. GO's Documents.Dato (dokumentets egen
+        # dato) bruges; om SBSYS saetter den eller "nu", ses foerst i et
+        # rigtigt kald — samme spoergsmaal som A2.
+        "dokument_dato": "RegistreringsDato", # [s] date-time
+        # Bruger-id fra mapping/bruger.csv. Om SBSYS lader servicekontoen
+        # registrere i en andens navn, ses foerst i et rigtigt kald.
+        "forfatter": "RegistreretAfID",       # [s] int
         # Journaliseringen skriver "Eksternid"; soegningen laeser "EksternId".
+        # Udfyldes IKKE (besluttet 11-11-2026).
         "ekstern_noegle": "Eksternid",
     },
     "part": {

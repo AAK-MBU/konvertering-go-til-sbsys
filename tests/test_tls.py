@@ -98,7 +98,8 @@ def test_nyt_navn_vinder_over_gammelt(monkeypatch):
 @pytest.mark.parametrize(
     "vaerdi,forventet",
     [
-        (True, "systemets CA-lager"),
+        (True, "Pythons eget CA-lager"),
+        ("system", "operativsystemets certifikatlager"),
         (False, "SLÅET FRA"),
         ("C:/certs/ca.pem", "CA-bundt: C:/certs/ca.pem"),
     ],
@@ -192,3 +193,92 @@ def test_bu_vaert_er_valgfri(monkeypatch):
 
     monkeypatch.delenv("SBSYS_BU_BASE_URL", raising=False)
     assert _bu_base_url() is None
+
+
+# --- SBSYS_VERIFY=system: operativsystemets certifikatlager ---------------
+#
+# På en kommunal Windows-pc ligger kommunens rod-CA i Windows' lager,
+# udrullet af IT. Pythons eget lager (certifi) kender den ikke. Med
+# "system" bruges maskinens lager via truststore, og der skal ikke
+# eksporteres en .pem.
+
+@pytest.mark.parametrize("vaerdi", ["system", "SYSTEM", "os", "windows", " system "])
+def test_system_genkendes(monkeypatch, vaerdi):
+    from konvertering.config import SYSTEMETS_LAGER
+
+    monkeypatch.setenv("SBSYS_VERIFY", vaerdi)
+    assert tls_verifikation() == SYSTEMETS_LAGER
+
+
+def test_system_bliver_til_en_ssl_kontekst_fra_maskinens_lager():
+    import ssl
+
+    from konvertering.config import SYSTEMETS_LAGER, httpx_verify
+
+    kontekst = httpx_verify(SYSTEMETS_LAGER)
+    assert isinstance(kontekst, ssl.SSLContext)
+    assert type(kontekst).__module__.startswith("truststore")
+
+
+@pytest.mark.parametrize("vaerdi", [True, False, "C:/certs/ca.pem"])
+def test_de_oevrige_former_gives_uaendret_videre(vaerdi):
+    from konvertering.config import httpx_verify
+
+    assert httpx_verify(vaerdi) == vaerdi
+
+
+def test_klienten_kan_bygges_med_systemets_lager():
+    from konvertering.config import SYSTEMETS_LAGER
+    from konvertering.sbsys.client import SbsysKlient
+
+    klient = SbsysKlient(
+        SbsysIndstillinger(base_url="https://sbsys-test", statisk_token="t",
+                           verificer_tls=SYSTEMETS_LAGER, kald_pr_sekund=0),
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200, json=[])),
+    )
+    assert klient.kald("GET", "/api/sag/sagStatusList", operation="hent").status == 200
+
+
+def test_token_hentes_ogsaa_med_systemets_lager(monkeypatch):
+    """Login går via sit eget kald (httpx.post) — det skal også bruge lageret."""
+    import ssl
+
+    from konvertering.config import SYSTEMETS_LAGER
+    from konvertering.sbsys.auth import BrugerAdgangskode
+
+    set_verify: list = []
+
+    def falsk_post(_url, **kw):
+        set_verify.append(kw.get("verify"))
+        return httpx.Response(200, json={"access_token": "x", "expires_in": 3600},
+                              request=httpx.Request("POST", _url))
+
+    monkeypatch.setattr("konvertering.sbsys.auth.httpx.post", falsk_post)
+    BrugerAdgangskode("https://sbsys/token", "k", "svc", "hem",
+                      verificer_tls=SYSTEMETS_LAGER).token()
+    assert isinstance(set_verify[0], ssl.SSLContext)
+
+
+def test_produktion_accepterer_systemets_lager(tmp_path):
+    from konvertering.config import (
+        SYSTEMETS_LAGER,
+        DatabaseIndstillinger,
+        FilIndstillinger,
+        Settings,
+    )
+
+    Settings(
+        miljoe="prod",
+        db=DatabaseIndstillinger(server="s", database="d", brugernavn="u", kodeord="p",
+                                 trust_server_certificate=False),
+        sbsys=SbsysIndstillinger(base_url="https://sbsys", statisk_token="t",
+                                 verificer_tls=SYSTEMETS_LAGER),
+        # tmp_path og ikke "/tmp": valider() kræver at filroden findes, og
+        # /tmp findes ikke nødvendigvis på Windows.
+        filer=FilIndstillinger(rod=tmp_path),
+    ).valider()
+
+
+def test_raadet_naevner_systemets_lager_foerst():
+    raad = raad_om_certifikat("https://sbsys-test")
+    assert raad.index("SBSYS_VERIFY=system") < raad.index("SBSYS_VERIFY=C:/")

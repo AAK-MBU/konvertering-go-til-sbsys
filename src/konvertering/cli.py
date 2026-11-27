@@ -50,7 +50,7 @@ from .files import FilOpslag
 from .hashing import kort_noegle
 from .idmap import IdMap, afslut_run, opret_run, tidligere_maal
 from .loaders import LOADERS, boelge_filter
-from .mapping import indlaes_csv, skriv_mangler_csv, skriv_mappe
+from .mapping import aktive_testvaerdier, indlaes_mapping, skriv_mangler_csv, skriv_mappe
 from .models import Objekttype
 from .sbsys.errors import (
     AutentifikationsFejl,
@@ -169,6 +169,8 @@ def _env_diagnose(env_status: str) -> int:
 
 
 _VARIABEL = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_]*)(?:\|([^)]*))?\)")
+# Variabler med dette præfiks hentes fra miljøet (.env), hvis --var ikke giver dem.
+ENV_PRAEFIKS = "TEST_"
 
 
 def erstat_variabler(sql: str, tildelinger: list[str]) -> tuple[str, list[str]]:
@@ -197,12 +199,43 @@ def erstat_variabler(sql: str, tildelinger: list[str]) -> tuple[str, list[str]]:
         navn, standard = m.group(1), m.group(2)
         if navn in vaerdier:
             return vaerdier[navn]
+        if navn.startswith(ENV_PRAEFIKS) and (fra_env := os.environ.get(navn, "").strip()):
+            # Fra .env, så fx et rigtigt sagsnummer aldrig skal skrives på
+            # kommandolinjen eller i filen. Kun TEST_-navne: et script må
+            # aldrig kunne trække et kodeord ind i SQL'en. Apostroffer
+            # fordobles, da værdien står inde i en N'...'-streng.
+            return fra_env.replace("'", "''")
         if standard is not None:
             return standard
         mangler.append(navn)
         return m.group(0)
 
     return _VARIABEL.sub(erstat, sql), sorted(set(mangler))
+
+
+GO_KILDE = "GOStaging.dbo"
+_SKEMANAVN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?")
+
+
+def skift_kilde(sql: str, kilde: str) -> str:
+    """Peg extract på en anden kilde end ``GOStaging.dbo``.
+
+    Til simulering: tabeller med præcis GOStaging's form, men falske data
+    (sql/998_gofake_kilde.sql). Selve extract-filen ændres ikke, så den
+    stadig kan køres i SSMS mod det rigtige dump.
+
+    Kun ``GOStaging.dbo.`` foran et tabelnavn erstattes. Navnet valideres:
+    det sættes ind i SQL, og et skemanavn kan ikke være en parameter.
+    """
+    if not _SKEMANAVN.fullmatch(kilde):
+        raise KonfigurationsFejl(
+            f"--kilde skal være SKEMA eller DATABASE.SKEMA, ikke '{kilde}'")
+    if kilde.lower() == GO_KILDE.lower():
+        return sql
+    antal = sql.count(f"{GO_KILDE}.")
+    if not antal:
+        raise KonfigurationsFejl(f"Scriptet læser ikke fra {GO_KILDE} — --kilde giver ingen mening her")
+    return sql.replace(f"{GO_KILDE}.", f"{kilde}.")
 
 
 def _sniff_kodning(sti: Path) -> str:
@@ -323,6 +356,9 @@ def _parser() -> argparse.ArgumentParser:
     d_koer.add_argument("fil", type=Path)
     d_koer.add_argument("--var", action="append", default=[], metavar="NAVN=VÆRDI",
                         help="Erstat $(NAVN) i scriptet. Kan gentages")
+    d_koer.add_argument("--kilde", default=None, metavar="SKEMA",
+                        help="Læs fra en anden kilde end GOStaging.dbo, fx "
+                             "SBSYS_KONV.gofake (falske data med GOStaging's form)")
     d_koer.add_argument("--raekker", type=int, default=40,
                         help="Højst så mange rækker pr. resultatsæt. 0 = alle")
     d_nul = db.add_parser(
@@ -399,7 +435,8 @@ def _parser() -> argparse.ArgumentParser:
         "opslag", help="Hent SBSYS' egne lister (afdelinger, skabeloner) som CSV")
     opslag.add_argument(
         "hvad",
-        choices=["afdelinger", "skabeloner", "brugere", "mig", "katalog", "tilbud"])
+        choices=["afdelinger", "skabeloner", "statusser", "dokumentarter", "brugere", "mig",
+                 "katalog", "tilbud"])
     opslag.add_argument("--ud", type=Path, default=None,
                         help="Standard: rapporter/<hvad>-fra-sbsys.csv")
 
@@ -425,11 +462,59 @@ def _parser() -> argparse.ArgumentParser:
     kald.add_argument("metode", help="GET, OPTIONS, POST ...")
     kald.add_argument("sti", help="Fx /bu_api/sag_foranstaltning")
     kald.add_argument("--base", default=None, help="Anden vært end SBSYS_BASE_URL")
+    kald.add_argument("--bu", action="store_true",
+                      help="Kald Børn og Unge-API'et (værten i SBSYS_BU_BASE_URL)")
     kald.add_argument("--krop", type=Path, default=None, help="JSON-fil som request-body")
+    kald.add_argument("--ud", type=Path, default=None, metavar="FIL",
+                      help="Skriv HELE svaret til en fil (UTF-8). Skærmen viser kun "
+                           "de første 20.000 tegn")
     kald.add_argument("--jatak", action="store_true",
                       help="Påkrævet for POST/PUT/PATCH/DELETE — de kan ændre data")
 
     under.add_parser("env", help="Vis hvilken .env der læses, og hvad der mangler")
+
+    vaerdi = under.add_parser(
+        "vaerdier", help="Værdimapping trin 1: saml GO's stavemåder til de værdier der er brug for")
+    v_under = vaerdi.add_subparsers(dest="vaerdier_kommando", required=True)
+    v_saml = v_under.add_parser(
+        "saml", help="Læs distinkte_vaerdier.xlsx og foreslå hvilke stavemåder der er samme værdi")
+    v_saml.add_argument("fil", type=Path, help="Excel-fil med én fane pr. GO-kolonne")
+    v_saml.add_argument("--ud", type=Path, default=None,
+                        help="Mappe til gennemsynet. Standard: samme mappe som Excel-filen")
+    v_saml.add_argument("--tidligere", type=Path, default=None, metavar="GENNEMSYN",
+                        help="Et tidligere gennemgået *-gennemsyn.xlsx: dine afgørelser "
+                             "kopieres ind, så kun nye GO-værdier skal gennemgås")
+    v_saml.add_argument("--overskriv", action="store_true",
+                        help="Overskriv eksisterende filer — også en gennemgang du er i gang med")
+    v_map = v_under.add_parser(
+        "mapning", help="Trin 2: læs det gennemgåede gennemsyn og byg mappingrækker mod SBSYS")
+    v_map.add_argument("fil", type=Path, help="Den gennemgåede *-gennemsyn.xlsx")
+    v_map.add_argument("--sbsys", action="append", default=[], metavar="LISTE=FIL",
+                       help="SBSYS' valgmuligheder som JSON, fx "
+                            "bevillingssted=rapporter/bevillingssted-liste-prod.json. Kan gentages")
+    v_map.add_argument("--hent-sbsys", action="store_true",
+                       help="Hent SBSYS' valglister (bevillingssted, kommune, klassetrin) "
+                            "direkte fra BU-API'et med GET i stedet for --sbsys-filer")
+    v_map.add_argument("--ud", type=Path, default=None,
+                       help="Mappe til resultatet. Standard: samme mappe som gennemsynet")
+    v_map.add_argument("--gem-db", action="store_true",
+                       help="Gem nøgletabellen i map.vaerdilistemulighed (erstatter indholdet)")
+    v_map.add_argument("--flet", action="append", default=[], metavar="LISTE",
+                       help="Flet listens 'klar'-rækker ind i mapping/tilbudsfeltvaerdi.csv "
+                            "(eksisterende nøgler erstattes). Kan gentages")
+
+    v_sb = v_under.add_parser(
+        "sagsbehandlere", help="Rens GO's sagsbehandlere til AZ-identer mod LIS' brugerliste")
+    v_sb.add_argument("fil", type=Path,
+                      help="distinkte_vaerdier.xlsx (kun fanen Sagsbehandler læses)")
+    v_sb.add_argument("--brugerliste", type=Path, required=True,
+                      help="LIS' brugerhistorik (IDENT, NAVN, STARTDATO, SLUTDATO, AKTIV)")
+    v_sb.add_argument("--tidligere", type=Path, default=None, metavar="GENNEMSYN",
+                      help="Et tidligere sagsbehandlere-gennemsyn.xlsx: afgørelserne kopieres ind")
+    v_sb.add_argument("--ud", type=Path, default=None,
+                      help="Mappe til gennemsynet. Standard: samme mappe som fil. "
+                           "Aldrig i repoet (persondata)")
+    v_sb.add_argument("--overskriv", action="store_true")
 
     spec = under.add_parser(
         "spec", help="Læs SBSYS' egen OpenAPI-beskrivelse — stier, felter, nøglekandidater")
@@ -466,6 +551,13 @@ def main(argv: list[str] | None = None) -> int:
     # Skal kunne køres NÅR konfigurationen fejler — derfor før valideringen.
     if args.kommando == "env":
         return _env_diagnose(env_status)
+    # Læser kun en Excel-fil og skriver CSV — ingen database, ingen SBSYS.
+    if args.kommando == "vaerdier":
+        if args.vaerdier_kommando == "mapning":
+            return _vaerdier_mapning(args)
+        if args.vaerdier_kommando == "sagsbehandlere":
+            return _vaerdier_sagsbehandlere(args)
+        return _vaerdier_saml(args)
 
     try:
         settings = Settings.fra_environment()
@@ -518,6 +610,9 @@ def _udfoer(args, settings: Settings) -> int:
                 log.error("Filen findes ikke: %s", args.fil)
                 return 2
             sql, mangler = erstat_variabler(args.fil.read_text(encoding="utf-8"), args.var)
+            if args.kilde:
+                sql = skift_kilde(sql, args.kilde)
+                log.info("Kilden er %s i stedet for %s", args.kilde, GO_KILDE)
             if mangler:
                 log.warning("Uerstattede variabler i scriptet: %s", ", ".join(mangler))
             log.info("Kører %s", args.fil.name)
@@ -543,8 +638,8 @@ def _udfoer(args, settings: Settings) -> int:
 
         db = Database(settings.db)
         if args.mapping_kommando == "load":
-            antal = indlaes_csv(db, MAPPING_MAPPE)
-            log.info("Indlæste %d mapping-rækker", antal)
+            antal = indlaes_mapping(db, MAPPING_MAPPE, settings.miljoe)
+            log.info("Indlæste %d mapping-rækker (miljø: %s)", antal, settings.miljoe)
             return 0
         if args.mapping_kommando == "gem":
             talt = skriv_mappe(db, args.ud)
@@ -662,6 +757,243 @@ def _udfoer(args, settings: Settings) -> int:
     return 0
 
 
+def _vaerdier_mapning(args: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from . import vaerdimapning as vm
+
+    if not args.fil.exists():
+        print(f"Findes ikke: {args.fil}", file=sys.stderr)
+        return 2
+    sbsys: dict[str, list[dict]] = {}
+    for tildeling in args.sbsys:
+        liste, _, fil = tildeling.partition("=")
+        if liste not in vm.SBSYS_LISTE_ID or not fil:
+            print(f"--sbsys skal være LISTE=FIL med LISTE en af {sorted(vm.SBSYS_LISTE_ID)}",
+                  file=sys.stderr)
+            return 2
+        sbsys[liste] = vm.laes_sbsys_liste(Path(fil))
+    if args.hent_sbsys:
+        try:
+            hentet = _hent_sbsys_lister([liste for liste in vm.HENTES_AUTOMATISK
+                                         if liste not in sbsys])
+        except (KonfigurationsFejl, KonverteringsFejl, RuntimeError) as e:
+            print(f"Kunne ikke hente SBSYS' lister: {e}", file=sys.stderr)
+            return 2
+        sbsys |= {liste: vm.laes_sbsys_liste_data(data) for liste, data in hentet.items()}
+    try:
+        valg = vm.laes_gennemsyn(args.fil)
+    except ValueError as e:
+        print(f"Intet skrevet. {e}", file=sys.stderr)
+        return 1
+    res = vm.byg(valg, sbsys)
+    raekker = vm.mapping_raekker(res, args.fil.name)
+    konflikter = vm.konflikter_med_mapping(
+        raekker, vm.eksisterende(SQL_MAPPE.parent / "mapping" / "tilbudsfeltvaerdi.csv"))
+
+    mappe = args.ud or args.fil.parent
+    stamme = args.fil.stem.removesuffix("-gennemsyn")
+    xlsx = vm.skriv_xlsx(res, konflikter, mappe / f"{stamme}-mapning.xlsx")
+    ud_csv = vm.skriv_csv(raekker, mappe / f"{stamme}-tilbudsfeltvaerdi.csv")
+    muligheder = vm.vaerdilistemuligheder(res)
+    ud_muligheder = vm.skriv_muligheder_xlsx(
+        muligheder, mappe / f"{stamme}-vaerdilistemuligheder.xlsx")
+
+    print(f"{'liste':16}{'stavemåder':>11}{'klar':>7}{'mangler_i_sbsys':>17}"
+          f"{'ikke_tjekket':>14}{'uafklaret':>11}{'ingen_tekstmatch':>18}")
+    for liste in sorted({v.liste for v in valg}):
+        s = Counter(v.status for v in valg if v.liste == liste)
+        print(f"{liste:16}{sum(s.values()):>11}{s[vm.KLAR]:>7}{s[vm.MANGLER_I_SBSYS]:>17}"
+              f"{s[vm.IKKE_TJEKKET]:>14}{s[vm.UAFKLARET]:>11}{s[vm.INGEN_TEKSTMATCH]:>18}")
+    print(f"\n  {len(res.tjek)} ting at tjekke, {len(konflikter)} konflikter med den nuværende mapping")
+    print(f"  oversigt:      {xlsx}")
+    print(f"  mappingrækker: {ud_csv} ({len(raekker)} rækker, kun 'klar')")
+    typer = Counter(m["noegletype"] for m in muligheder)
+    print(f"  nøgletabel:    {ud_muligheder} ({len(muligheder)} rækker: "
+          + ", ".join(f"{k} {n}" for k, n in sorted(typer.items())) + ")")
+    if not sbsys:
+        print("\nIngen SBSYS-lister givet, så intet er 'klar'. Brug --sbsys LISTE=FIL.")
+    if args.gem_db:
+        ikke_tjekket = sorted({v.liste for v in valg if v.status == vm.IKKE_TJEKKET})
+        if ikke_tjekket:
+            print(f"--gem-db: {', '.join(ikke_tjekket)} er ikke tjekket mod SBSYS. "
+                  f"Brug --hent-sbsys. Intet gemt.", file=sys.stderr)
+            return 1
+        db = Database(Settings.fra_environment().db)
+        try:
+            antal = vm.gem_i_db(db, muligheder, args.fil.name)
+        finally:
+            db.luk()
+        print(f"  gemt i db:     map.vaerdilistemulighed ({antal} rækker, erstattet)")
+    for liste in args.flet:
+        if liste not in sbsys:
+            print(f"--flet {liste}: listen er ikke tjekket mod SBSYS (mangler --sbsys "
+                  f"{liste}=FIL). Intet flettet.", file=sys.stderr)
+            return 1
+        kolonner = vm.kolonner_for(liste)
+        valgte = [r for r in raekker if r["go_vaerdi"].split("|", 1)[0] in kolonner]
+        maal = SQL_MAPPE.parent / "mapping" / "tilbudsfeltvaerdi.csv"
+        # GO-værdier i listen der IKKE længere er klar: deres gamle map-række skal væk,
+        # ellers mapper konverteringen stadig til det gamle mål.
+        ikke_klar = {f"{kolonne}|{v.go_vaerdi}" for v in valg
+                     if v.liste == liste and v.status != vm.KLAR for kolonne in v.go_kolonner}
+        erstattet, tilfoejet, fjernet = vm.flet(maal, valgte, ikke_klar)
+        print(f"\nFlettet {liste} ind i {maal}: {len(erstattet)} erstattet, "
+              f"{len(tilfoejet)} tilføjet, {len(fjernet)} fjernet")
+        for k in tilfoejet:
+            print(f"  tilføjet:  {k}")
+        for k in fjernet:
+            print(f"  fjernet:   {k}")
+    return 0
+
+
+def _hent_sbsys_lister(lister: list[str]) -> dict[str, object]:
+    """GET af SBSYS' valgmuligheder for hver liste via BU-API'et. Kun læsning."""
+    from . import vaerdimapning as vm
+
+    settings = Settings.fra_environment()
+    sbsys = settings.sbsys
+    if not sbsys.bu_base_url:
+        raise RuntimeError("SBSYS_BU_BASE_URL er ikke sat i .env")
+    sbsys = replace(sbsys, base_url=sbsys.bu_base_url)
+    print(f"Henter valglister fra {sbsys.base_url}")
+    kontekst = byg_kontekst(replace(settings, sbsys=sbsys))
+    ud: dict[str, object] = {}
+    try:
+        for liste in lister:
+            nr = vm.SBSYS_LISTE_ID[liste]
+            svar = kontekst.klient.kald(
+                "GET", f"/bu_api/tilbudfeltvaerdiliste/{nr}/tilbudfeltvaerdilistemulighed",
+                operation="vaerdier_mapning", forventede_status=(200,))
+            ud[liste] = svar.krop
+            antal = len(svar.krop) if isinstance(svar.krop, list) else "?"
+            print(f"  {liste:15} liste {nr:>3}: {antal} valgmuligheder")
+    finally:
+        kontekst.klient.luk()
+    return ud
+
+
+def _vaerdier_sagsbehandlere(args: argparse.Namespace) -> int:
+    """Persondata: kun ANTAL i terminalen. Navnene står kun i Excel-filen."""
+    from . import sagsbehandlere as sb
+
+    for sti in (args.fil, args.brugerliste, args.tidligere):
+        if sti is not None and not sti.exists():
+            print(f"Findes ikke: {sti}", file=sys.stderr)
+            return 2
+    mappe = (args.ud or args.fil.parent).resolve()
+    repo = SQL_MAPPE.parent.resolve()
+    if mappe == repo or repo in mappe.parents:
+        print(f"Gennemsynet indeholder navne og må ikke ligge i repoet ({repo}). "
+              f"Brug --ud til en mappe udenfor.", file=sys.stderr)
+        return 2
+    ud = mappe / "sagsbehandlere-gennemsyn.xlsx"
+    if args.tidligere and args.tidligere.resolve() == ud:
+        print(f"Det nye gennemsyn ville overskrive det tidligere ({ud}).\n"
+              f"Omdøb det tidligere først (fx til ...-runde1.xlsx), eller brug --ud.",
+              file=sys.stderr)
+        return 1
+    if ud.exists() and not args.overskriv:
+        print(f"{ud} findes allerede — måske med din gennemgang i. Intet er overskrevet.\n"
+              f"Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
+        return 1
+    try:
+        personer = sb.laes_brugerliste(args.brugerliste)
+        go = sb.laes_go_sagsbehandlere(args.fil)
+    except ValueError as e:
+        print(f"Intet skrevet. {e}", file=sys.stderr)
+        return 1
+    print(f"Brugerliste: {len(personer)} personer (AZ-identer), "
+          f"{sum(p.aktiv for p in personer.values())} aktive")
+    print(f"GO: {len(go)} forskellige sagsbehandler-værdier")
+    raekker = sb.saml(go, personer)
+    forsvundne: list[str] = []
+    if args.tidligere:
+        try:
+            forsvundne = sb.overfoer(raekker, args.tidligere)
+        except ValueError as e:
+            print(f"Intet skrevet. Det tidligere gennemsyn kunne ikke læses: {e}", file=sys.stderr)
+            return 1
+    sb.skriv(raekker, personer, ud)
+
+    status, grund = sb.opsummering(raekker)
+    print(f"\n  auto {status[sb.AUTO]}   forslag {status[sb.FORSLAG]}   afklar {status[sb.AFKLAR]}"
+          f"  (afklar bliver '{sb.UKENDT_BRUGER}', medmindre rettet_vaerdi er udfyldt)")
+    for g, n in grund.most_common():
+        print(f"  {n:>6}  {g}")
+    if args.tidligere:
+        from collections import Counter
+        o = Counter(r.overfoert for r in raekker)
+        print(f"\n  Overført: {o['overført'] + o['overført, forslag ændret']}, "
+              f"tidligere uafklaret: {o['tidligere uafklaret']}, NY: {o['ny']}"
+              + (f", forsvundet fra GO: {len(forsvundne)}" if forsvundne else ""))
+    print(f"\n  skrevet: {ud}")
+    print("\n'forslag' godkendes med x i 'godkendt'. 'afklar': skriv AZ-identen i "
+          f"'rettet_vaerdi'. Resten bliver '{sb.UKENDT_BRUGER}'.")
+    return 0
+
+
+def _vaerdier_saml(args: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from . import vaerdier
+
+    if not args.fil.exists():
+        print(f"Findes ikke: {args.fil}", file=sys.stderr)
+        return 2
+    faner, sprunget_over = vaerdier.laes_xlsx(args.fil)
+    for fane in sprunget_over:
+        print(f"Springer fanen {fane} over: {vaerdier.UDELADTE_FANER[fane]}")
+    try:
+        resultat = vaerdier.saml(faner)
+    except ValueError as e:
+        print(f"Intet skrevet. {e}", file=sys.stderr)
+        return 1
+    sti = vaerdier.gennemsyn_sti(args.fil, args.ud)
+    if args.tidligere and not args.tidligere.exists():
+        print(f"Findes ikke: {args.tidligere}", file=sys.stderr)
+        return 2
+    if args.tidligere and args.tidligere.resolve() == sti.resolve():
+        print(f"Det nye gennemsyn ville overskrive det tidligere ({sti}) — dine afgørelser.\n"
+              f"Omdøb det tidligere først (fx til ...-gennemsyn-runde1.xlsx), eller brug --ud.",
+              file=sys.stderr)
+        return 1
+    if sti.exists() and not args.overskriv:
+        print(f"{sti} findes allerede — måske med din gennemgang i. Intet er overskrevet.\n"
+              f"Brug --overskriv, eller --ud til en anden mappe.", file=sys.stderr)
+        return 1
+
+    forsvundne: list[tuple[str, str]] = []
+    if args.tidligere:
+        try:
+            forsvundne = vaerdier.overfoer(resultat, args.tidligere)
+        except ValueError as e:
+            print(f"Intet skrevet. Det tidligere gennemsyn kunne ikke læses: {e}", file=sys.stderr)
+            return 1
+
+    print(f"{'liste':16}{'stavemåder':>11}{'værdier':>9}{'auto':>7}{'forslag':>9}{'afklar':>8}")
+    for liste, raekker in resultat.items():
+        status = Counter(r.status for r in raekker)
+        print(f"{liste:16}{len(raekker):>11}{len(vaerdier.vaerdiliste(raekker)):>9}"
+              f"{status['auto']:>7}{status['forslag']:>9}{status['afklar']:>8}")
+    print(f"  skrevet: {vaerdier.skriv(resultat, sti)}")
+    if args.tidligere:
+        alle = [r for rs in resultat.values() for r in rs]
+        o = Counter(r.overfoert for r in alle)
+        print(f"\nOverført fra {args.tidligere.name}:")
+        print(f"  {o[vaerdier.OVERFOERT]:>5}  overført - din afgørelse er kopieret ind")
+        print(f"  {o[vaerdier.OVERFOERT_AENDRET]:>5}  overført, forslag ændret - "
+              f"afgørelsen står i rettet_vaerdi")
+        print(f"  {o[vaerdier.TIDLIGERE_UAFKLARET]:>5}  tidligere uafklaret - stadig ikke afgjort")
+        print(f"  {o[vaerdier.NY]:>5}  NY - skal gennemgås (filtrér kolonnen 'overfoert' på 'ny')")
+        if forsvundne:
+            print(f"  {len(forsvundne):>5}  stod i det tidligere gennemsyn, men ikke i det nye "
+                  f"udtræk (ingen handling)")
+    print("\nÉn fane pr. liste. 'forslag' godkendes (ja/nej i 'godkendt'), "
+          "'afklar' kræver en beslutning. 'rettet_vaerdi' overskriver forslaget.")
+    return 0
+
+
 def _db_nulstil(db: Database, args) -> int:
     """Tøm konverteringsdatabasen, så næste dump kan læses ind i et rent bord.
 
@@ -708,7 +1040,7 @@ def _db_nulstil(db: Database, args) -> int:
     if indlaeste:
         ud = args.ud or Path("rapporter/oprettede-foer-nulstilling.csv")
         ud.parent.mkdir(parents=True, exist_ok=True)
-        kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "boelge", "run_id",
+        kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "sbsys_nummer", "boelge", "run_id",
                     "opdateret"]
         with ud.open("w", encoding="utf-8-sig", newline="") as f:
             skriver = csv.DictWriter(f, fieldnames=kolonner, extrasaction="ignore",
@@ -723,9 +1055,11 @@ def _db_nulstil(db: Database, args) -> int:
     for tabel, antal in slettet.items():
         if antal:
             log.info("%-20s %8d slettet", tabel, antal)
-    log.info("Konverteringsdatabasen er nulstillet. Bølger og kodelister er bevaret.")
     if args.ogsaa_mapning:
+        log.info("Konverteringsdatabasen er nulstillet. Bølgerne er bevaret.")
         log.warning("Kodelisterne er også ryddet. Kør `konv mapping load` igen.")
+    else:
+        log.info("Konverteringsdatabasen er nulstillet. Bølger og kodelister er bevaret.")
     return 0
 
 
@@ -762,7 +1096,7 @@ def _oprettede(settings: Settings, args) -> int:
         return 0
 
     args.ud.parent.mkdir(parents=True, exist_ok=True)
-    kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "boelge", "run_id", "opdateret"]
+    kolonner = ["objekt_type", "kilde_noegle", "sbsys_id", "sbsys_nummer", "boelge", "run_id", "opdateret"]
     with args.ud.open("w", encoding="utf-8-sig", newline="") as f:
         skriver = csv.DictWriter(f, fieldnames=kolonner, extrasaction="ignore",
                                  delimiter=";")
@@ -792,7 +1126,7 @@ def _scan_filer(settings: Settings, args) -> int:
     opslag = FilOpslag(settings.filer)
     filter_sql, params = boelge_filter(valgt)
     opdateringer: list[tuple] = []
-    talt = {"ok": 0, "mangler": 0, "tom": 0, "for_stor": 0}
+    talt = {"ok": 0, "mangler": 0, "tvetydig": 0, "tom": 0, "for_stor": 0}
 
     # Sideopdelt, ikke streamet: vi skriver fil_status undervejs.
     for raekke in db.hent_i_sider(
@@ -803,7 +1137,7 @@ def _scan_filer(settings: Settings, args) -> int:
         graense=args.graense,
     ):
         r = opslag.undersoeg(
-            raekke["fil_relativ_sti"], raekke["fil_navn"],
+            raekke["fil_relativ_sti"],
             beregn_checksum=not args.uden_checksum,
         )
         talt[r.status] = talt.get(r.status, 0) + 1
@@ -814,15 +1148,34 @@ def _scan_filer(settings: Settings, args) -> int:
 
     _gem_filstatus(db, opdateringer)
     log.info("Filscan færdig: %s", talt)
-    return 0 if talt.get("mangler", 0) == 0 else 1
+    return 0 if talt.get("mangler", 0) == 0 and talt.get("tvetydig", 0) == 0 else 1
 
 
 def _gem_filstatus(db: Database, raekker: list[tuple]) -> None:
-    if raekker:
-        db.udfoer_mange(
-            "UPDATE stg.dokument SET fil_status = ?, fil_stoerrelse = ?, "
-            "fil_sha256 = ?, mime = ? WHERE kilde_noegle = ?",
-            raekker,
+    """Skriv scanningens resultat på dokumenterne — og kontrollér at det skete.
+
+    Kørt med fast_executemany matchede UPDATE'en ingenting: fil_status stod
+    NULL på alle dokumenter, mens loggen meldte "ok: 3, mangler: 1". Et
+    dokument uden fil blev derfor stående på arbejdslisten. Nu køres den én
+    række ad gangen, og antallet af ændrede rækker skal gå op.
+
+    COALESCE på checksummen: extract har allerede lagt KILDENS checksum
+    (Documents.SHACheckSum / DocumentSHA) i fil_sha256. Uden den blev den
+    overskrevet af vores egen — og med --uden-checksum af NULL. Se B13.
+    """
+    if not raekker:
+        return
+    beroert = db.udfoer_mange(
+        "UPDATE stg.dokument SET fil_status = ?, fil_stoerrelse = ?, "
+        "fil_sha256 = COALESCE(fil_sha256, ?), mime = ? WHERE kilde_noegle = ?",
+        raekker,
+    )
+    if beroert != len(raekker):
+        raise KonverteringsFejl(
+            f"Filscanningen skrev kun status på {beroert} af {len(raekker)} dokumenter. "
+            f"Resten står uændret i stg.dokument, og et dokument uden fil kan "
+            f"derfor komme med på arbejdslisten. Kør `konv filer scan` igen, og "
+            f"undersøg sagen hvis tallene stadig ikke går op."
         )
 
 
@@ -869,6 +1222,12 @@ def _load(settings: Settings, args) -> int:
 
     _kontroller_maal(db, settings, args.objekt_type, valgt)
 
+    # Testmiljøets id'er og feltnavne må aldrig følge med ind i produktion.
+    if settings.er_produktion and (antal_test := aktive_testvaerdier(db)):
+        log.error("%d aktive kodelisterækker kommer fra testmiljøet. Kør "
+                  "`konv mapping load` med KONV_MILJOE=prod først.", antal_test)
+        return 2
+
     run_id = opret_run(
         db, fase="load", miljoe=settings.miljoe, dry_run=settings.dry_run,
         objekt_type=args.objekt_type, kodeversion=settings.kodeversion,
@@ -908,6 +1267,11 @@ _OPSLAG = {
     "katalog": ("hent_katalog", ("paragrafId", "paragraf", "foranstaltningId",
                                  "foranstaltning", "tilbudId", "tilbud")),
     "tilbud": ("hent_tilbud", ("id", "navn", "tilbudType", "inaktiv", "inaktivDato")),
+    # SagsStatusDto. RequireComments viser hvilke statusser der kræver en
+    # kommentar ved skift — loaderen sender derfor altid en.
+    "statusser": ("hent_statusser", ("Id", "Navn", "SagsTilstand", "RequireComments", "Orden")),
+    # DokumentArtDto — kilden til mapping/dokumentkategori.csv.
+    "dokumentarter": ("hent_dokumentarter", ("Id", "Navn", "Uuid")),
 }
 
 # Lister der ligger i Børn og Unge-API'et og ikke i SBSYS selv.
@@ -1180,8 +1544,14 @@ def _kald(settings: Settings, args: argparse.Namespace) -> int:
         krop = json.loads(args.krop.read_text(encoding="utf-8-sig"))
 
     sbsys = replace(settings.sbsys, maks_forsoeg=1)
-    if args.base:
+    if args.bu:
+        if not sbsys.bu_base_url:
+            print("SBSYS_BU_BASE_URL er ikke sat i .env.", file=sys.stderr)
+            return 2
+        sbsys = replace(sbsys, base_url=sbsys.bu_base_url)
+    elif args.base:
         sbsys = replace(sbsys, base_url=args.base.rstrip("/"))
+    log.info("Kalder %s", sbsys.base_url)
     kontekst = byg_kontekst(replace(settings, sbsys=sbsys))
     try:
         svar = kontekst.klient.kald(
@@ -1200,12 +1570,22 @@ def _kald(settings: Settings, args: argparse.Namespace) -> int:
     legeme = svar.krop
     if isinstance(legeme, bytes):
         legeme = legeme.decode("utf-8", "replace")
-    if isinstance(legeme, (dict, list)):
-        print(json.dumps(legeme, indent=2, ensure_ascii=False)[:20000])
-    elif legeme:
-        print(str(legeme)[:20000])
+    tekst = (json.dumps(legeme, indent=2, ensure_ascii=False)
+             if isinstance(legeme, (dict, list)) else str(legeme or ""))
+
+    # Til en fil: hele svaret, i UTF-8. `> fil` i PowerShell klipper ved
+    # 20.000 tegn og ødelægger æøå (konsollens tegntabel) — 19-11-2026.
+    if args.ud:
+        args.ud.write_text(tekst, encoding="utf-8")
+        antal = f", {len(legeme)} elementer" if isinstance(legeme, list) else ""
+        print(f"Hele svaret ({len(tekst)} tegn{antal}) er skrevet til {args.ud}")
+        return 0
+
+    if len(tekst) > 20000:
+        print(tekst[:20000])
+        print(f"\n... klippet ved 20.000 af {len(tekst)} tegn. Brug --ud FIL for hele svaret.")
     else:
-        print("(tom krop)")
+        print(tekst or "(tom krop)")
     return 0
 
 
