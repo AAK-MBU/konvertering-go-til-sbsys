@@ -58,7 +58,8 @@ INGEN_TEKSTMATCH = "ingen_tekstmatch"   # intet id i GO, ikke fundet i prod -> k
 # gennemsynets navnegæt (fx "Arvepr. Carolines Børneasyl" -> "... [503]",
 # som viste sig forkert). I stedet:
 #   a. håndmappet til en privatskole "[instnr N]"  -> beholdes (PDF'en, 3.3)
-#   b. indeholder "dagtilbud", "skole" eller "school" -> navnet slås op i
+#   b. indeholder "dagtilbud", "skole", "school" eller "SDT" (selvejende
+#      dagtilbud, godkendt af LIS 27-11-2026) -> navnet slås op i
 #      prods liste (uden "[..]", store/små og mellemrum er ligegyldige).
 #      Præcis ét træf -> det bruges. Ellers gælder gennemsynets afgørelse
 #      (fx "Tranbjerg skole" -> "Tranbjergskolen [725]").
@@ -66,7 +67,7 @@ INGEN_TEKSTMATCH = "ingen_tekstmatch"   # intet id i GO, ikke fundet i prod -> k
 # Har GO-værdien et id ("[N]", "[instnr N]" eller et tal foran), gælder
 # gennemsynets afgørelse som hidtil.
 TEKSTREGEL_LISTER = frozenset({"bevillingssted", "institution"})
-_TEKSTREGEL_ORD = re.compile(r"dagtilbud|skole|school", re.IGNORECASE)
+_TEKSTREGEL_ORD = re.compile(r"dagtilbud|skole|school|\bsdt\b", re.IGNORECASE)
 _GO_ID = re.compile(r"\[\s*(instnr\s*)?\d+\s*[\]}]|^\s*\d+\s")
 
 
@@ -210,7 +211,7 @@ def anvend_tekstregel(valg: list[Valg], sbsys: dict[str, list[dict]]) -> None:
                     v.endelig, v.kilde = traef[0]["vaerdiMulighed"], "tekstregel"
                 continue                                         # ellers: gennemsynet
             v.endelig, v.kilde, v.status = None, "tekstregel", INGEN_TEKSTMATCH  # c.
-            v.bemaerkning = ("Intet id i GO og hverken 'dagtilbud', 'skole' eller "
+            v.bemaerkning = ("Intet id i GO og hverken 'dagtilbud', 'skole', 'SDT' eller "
                              "'school' -> konvertering_")
 
 

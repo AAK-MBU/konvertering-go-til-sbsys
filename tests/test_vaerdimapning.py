@@ -212,6 +212,7 @@ PROD_BEV = [
     {"id": 3, "vaerdiMulighed": "Klubben Liffen [1682]", "aktiv": True},
     {"id": 4, "vaerdiMulighed": "Møllevang dagtilbud [158]", "aktiv": True},
     {"id": 5, "vaerdiMulighed": "Rudolf Steiner-Skolen i Aarhus [instnr 751062]", "aktiv": True},
+    {"id": 6, "vaerdiMulighed": "Børnehaven Kløverparken (SDT) [51]", "aktiv": True},
 ]
 
 
@@ -366,3 +367,14 @@ def test_noegletabellen_findes_i_map_skemaet():
     for kolonne in vm.MULIGHED_KOLONNER:
         assert f"    {kolonne} " in sql, kolonne
     assert "map.v_vaerdilistemuligheder_til_lis" in sql
+
+
+def test_tekstregel_sdt_er_dagtilbud():
+    """(SDT) = selvejende dagtilbud: navnet slås op i prod (LIS 27-11-2026)."""
+    valg = [_v("Børnehaven Kløverparken (sdt)", None, ""),         # b. træf
+            _v("Børnehaven Svend Åge (Sdt)", None, ""),            # b. uden træf
+            _v("Bisdtrup Klub", None, "")]                        # 'sdt' inde i et ord: c.
+    vm.byg(valg, {"bevillingssted": PROD_BEV})
+    assert (valg[0].status, valg[0].sbsys_id) == (vm.KLAR, 6)
+    assert valg[1].status == vm.UAFKLARET
+    assert valg[2].status == vm.INGEN_TEKSTMATCH
