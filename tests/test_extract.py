@@ -76,11 +76,17 @@ def test_sammenstoed_genkendes():
     assert not _sammenstoedende_strenge("SET @x = N'a '\n  + N'b';")
 
 
-def test_journalark_og_workflows_bruger_ikke_scpfolder():
+def test_journalark_bruger_ikke_scpfolder():
     kode = _kode()
     assert "n.[SagsId] + N'/' + n.[DokumentID]" in kode
-    assert "w.[SagsId] + N'/' + w.[DokumentID]" in kode
     assert "[ScpFolder]" not in kode
+
+
+def test_workflows_konverteres_ikke():
+    """Omgjort 26-11-2026: GOWorkflows skal ikke med (SBSYS har intet
+    workflow-begreb). Extract må ikke læse tabellen."""
+    assert "[GOWorkflows]" not in _kode()
+    assert "'WF:' +" not in _kode()
 
 
 # --- kommentarer skal være lukkede ----------------------------------------
@@ -181,7 +187,8 @@ def test_gostaging_mod_stg_sammenligninger_har_collate():
     # (et alias med [Kolonne] fra GOStaging, eller r.* afledt af GOStaging).
     sammenligninger = re.findall(
         r"FROM stg\.\w+ \w+ WHERE \w+\.kilde_noegle = (\w+\.(?:\[\w+\]|\w+))([^)]*)\)", kode)
-    assert len(sammenligninger) >= 9, f"fandt kun {len(sammenligninger)} — er mønsteret ændret?"
+    # 7 efter at workflows blev taget ud 26-11-2026 (de havde to).
+    assert len(sammenligninger) >= 7, f"fandt kun {len(sammenligninger)} — er mønsteret ændret?"
     uden = [f"{venstre}{resten}" for venstre, resten in sammenligninger
             if "COLLATE DATABASE_DEFAULT" not in resten]
     assert not uden, f"mangler COLLATE DATABASE_DEFAULT: {uden}"

@@ -3,4 +3,3 @@ dokumentkategori;Indgående;Indgående;1;Indgående;map;GO Documents.DokumentKat
 dokumentkategori;Udgående;Udgående;2;Udgående;map;GO Documents.DokumentKategori -> SBSYS DokumentArt (prod, konv opslag dokumentarter 26-11-2026). 1:1.;;
 dokumentkategori;Intern;Intern;3;Internt;map;GO Documents.DokumentKategori -> SBSYS DokumentArt (prod, konv opslag dokumentarter 26-11-2026). GO skriver Intern, SBSYS Internt.;;
 dokumentkategori;Journalnotat;Journalnotat (GO JournalNotes);5;Notat;map;Kategorien saettes af extract - GO's JournalNotes har ingen kategori-kolonne (tjekket 26-11-2026).;;
-dokumentkategori;Workflow;Workflow (GO GOWorkflows);6;Andet;map;Kategorien saettes af extract - GO's GOWorkflows har ingen kategori-kolonne, og SBSYS har intet workflow-begreb. Journaliseres som almindelige dokumenter (B12, 11-11-2026).;;

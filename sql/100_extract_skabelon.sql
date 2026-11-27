@@ -42,9 +42,10 @@
      de lander i stg.dokument med praefikset 'JN:' paa noeglen og
      kategorien 'Journalnotat'. stg.notat fyldes ikke laengere.
 
-  2) GOWorkflows ER OGSAA DOKUMENTER.
-     Samme form som JournalNotes, og det er .txt-filer der skal paa
-     sagen som dokumenter (B12, besvaret 11-11-2026). Praefiks 'WF:'.
+  2) GOWorkflows KONVERTERES IKKE.
+     B12 (11-11-2026) sagde dokumenter med praefiks 'WF:', men det er
+     omgjort 26-11-2026 efter aftale med en sagsbehandler: SBSYS har intet
+     workflow-begreb, og filerne skal ikke med. Tabellen laeses ikke.
 
   3) CHECKSUMMER FINDES ALLEREDE.
      Documents.SHACheckSum, JournalNotes.SHACheckSum og DocumentSHA.
@@ -380,41 +381,6 @@ FROM   GOStaging.dbo.[JournalNotes] AS n
 WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* ================================================================== */
-/* 5b) Workflows — ogsaa dokumenter                                    */
-/* ================================================================== */
-/*
-  B12 besvaret 11-11-2026: GOWorkflows er .txt-filer der skal paa sagen
-  som dokumenter, praecis som journalnotaterne. Samme form i kilden
-  (DokumentID = filnavn, ScpFolder = mappe), samme behandling her.
-
-  Praefikset er 'WF:'. Tre navnerum i samme tabel — heltal fra Documents,
-  'JN:' fra journalnotater, 'WF:' herfra — og ingen af dem kan kollidere.
-*/
-INSERT INTO stg.dokument (
-    kilde_noegle, sag_noegle, titel, kategori_go, dokument_dato,
-    retning, version, er_hoved_dok, er_kladde,
-    fil_relativ_sti, fil_navn, fil_sha256, raa_json
-)
-SELECT
-    'WF:' + CONVERT(VARCHAR(196), w.[DokumentID]),
-    w.[SagsId],
-    LEFT(COALESCE(NULLIF(LTRIM(RTRIM(w.[DokumentTitel])), N''),
-                  w.[DokumentID]), 500),
-    N'Workflow',
-    TRY_CONVERT(DATETIME2(3), w.[Dato]),
-    'internt',
-    1,
-    1,
-    0,
-    /* Samme form som journalnotaterne — se dem for hvorfor ikke ScpFolder */
-    w.[SagsId] + N'/' + w.[DokumentID],
-    w.[DokumentID],
-    NULLIF(LTRIM(RTRIM(w.[SHACheckSum])), N''),
-    (SELECT w.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)
-FROM   GOStaging.dbo.[GOWorkflows] AS w
-WHERE  EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId] COLLATE DATABASE_DEFAULT);
-
-/* ================================================================== */
 /* 6) Indsatser                                                        */
 /* ================================================================== */
 /*
@@ -596,8 +562,6 @@ UNION ALL SELECT 'Indlaest', 'sag_part', COUNT(*) FROM stg.sag_part
 UNION ALL SELECT 'Indlaest', 'dokument', COUNT(*) FROM stg.dokument
 UNION ALL SELECT 'Indlaest', 'heraf journalnotat',
        COUNT(*) FROM stg.dokument WHERE kilde_noegle LIKE 'JN:%'
-UNION ALL SELECT 'Indlaest', 'heraf workflow',
-       COUNT(*) FROM stg.dokument WHERE kilde_noegle LIKE 'WF:%'
 UNION ALL SELECT 'Indlaest', 'heraf kladde',
        COUNT(*) FROM stg.dokument WHERE er_kladde = 1
 UNION ALL SELECT 'Indlaest', 'notat (forventet 0)', COUNT(*) FROM stg.notat
@@ -617,11 +581,7 @@ WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = d.[SagsId] COL
 UNION ALL
 SELECT 'Forældreloese', 'journalnotat', COUNT(*)
 FROM   GOStaging.dbo.[JournalNotes] n
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT)
-UNION ALL
-SELECT 'Forældreloese', 'workflow', COUNT(*)
-FROM   GOStaging.dbo.[GOWorkflows] w
-WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = w.[SagsId] COLLATE DATABASE_DEFAULT);
+WHERE  NOT EXISTS (SELECT 1 FROM stg.sag s WHERE s.kilde_noegle = n.[SagsId] COLLATE DATABASE_DEFAULT);
 
 /* Journalnotater uden en sti: de kan ikke findes paa fileshare. */
 SELECT 'Journalnotat uden sti' AS afsnit, COUNT(*) AS antal
