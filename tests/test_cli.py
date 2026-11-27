@@ -430,8 +430,22 @@ def test_udvalg_scriptet_laeser_sagen_fra_env_og_kopierer_alle_syv_tabeller():
     sql = Path("sql/997_udvalg_kilde.sql").read_text(encoding="utf-8")
     # Cases, Contacts, Foranstaltningsdata, Documents, JournalNotes, GOWorkflows
     # (DocumentSHA følger Documents). Ingen tabel oprettes tom længere.
-    assert sql.count("$(TEST_ABA_SAGS_ID)") == 6
+    # Sagsnumrene samles ÉT sted (udvalg.Ider) og bruges derfra overalt.
+    assert sql.count("$(TEST_SAGS_IDER|)") == 1 and sql.count("$(TEST_ABA_SAGS_ID|)") == 1
+    assert sql.count("IN (SELECT id FROM udvalg.Ider)") == 6
     assert "TOP (0)" not in sql
     for tabel in ("Cases", "Contacts", "Documents", "DocumentSHA",
                   "Foranstaltningsdata", "GOWorkflows", "JournalNotes"):
         assert f"INTO udvalg.{tabel}" in sql
+
+
+def test_udvalg_uden_variabler_giver_tom_liste_ikke_uerstattet_tekst(monkeypatch):
+    """Begge variabler har en tom standard: mangler én, kører scriptet stadig
+    (og stopper selv, hvis der slet ingen sagsnumre er)."""
+    from pathlib import Path
+    monkeypatch.delenv("TEST_SAGS_IDER", raising=False)
+    monkeypatch.setenv("TEST_ABA_SAGS_ID", "PPR-X")
+    sql, mangler = erstat_variabler(
+        Path("sql/997_udvalg_kilde.sql").read_text(encoding="utf-8"), [])
+    assert not mangler
+    assert "N'' + N',' + N'PPR-X'" in sql
