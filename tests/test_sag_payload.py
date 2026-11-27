@@ -391,12 +391,20 @@ class BrugerKlient:
         return SimpleNamespace(status=200, krop={"Results": self.brugere}, korrelations_id="k")
 
 
-def _bruger_loader(brugere, kodelister=None):
+def _bruger_loader(brugere, kodelister=None, noegletabel=None):
     from konvertering.mapping import Kodelister
 
+    afviste: list[tuple] = []
+    db = SimpleNamespace(
+        hent_alle=lambda _sql, *_p: [{"go_feltvaerdi": go, "vaerdimulighed_external_key": az}
+                                     for go, az in (noegletabel or {}).items()],
+        udfoer=lambda _sql, *p: afviste.append(p))
     k = SimpleNamespace(endpoints=Endpoints(), klient=BrugerKlient(brugere),
-                        kodelister=kodelister or Kodelister({}))
-    return SagLoader(k)
+                        kodelister=kodelister or Kodelister({}), db=db, run_id=1,
+                        boelge="borgersager")
+    loader = SagLoader(k)
+    loader.afviste = afviste
+    return loader
 
 
 BRUGERE = [{"Id": 41, "LogonId": "AAK\\AZ12345"}, {"Id": 42, "LogonId": "az123456"}]
@@ -417,13 +425,32 @@ def test_kun_et_praecist_traef_taeller(monkeypatch):
     assert loader._ansvarlig({"ansvarlig_go": "az12345", "kilde_noegle": "K"}) == "542"
 
 
-def test_mapningen_vinder_over_opslaget(monkeypatch):
-    from konvertering.mapping import Kodelister, Opslag
-
+def test_noegletabellen_bruges_naar_go_vaerdien_ikke_har_en_az(monkeypatch):
+    """Sagsbehandlere-gennemsynet: stavemåde -> AZ (27-11-2026)."""
     monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
-    loader = _bruger_loader(BRUGERE, Kodelister({("bruger", "az12345"): Opslag("99", "map")}))
-    assert loader._ansvarlig({"ansvarlig_go": "az12345", "kilde_noegle": "K"}) == "99"
-    assert loader.k.klient.soegninger == []
+    loader = _bruger_loader(BRUGERE, noegletabel={"Jakob Hansen Thomsen": "az12345"})
+    assert loader._ansvarlig({"ansvarlig_go": "Jakob Hansen Thomsen ", "kilde_noegle": "K"}) == "41"
+    assert loader.afviste == []
+
+
+def test_az_i_go_vaerdien_vinder_over_noegletabellen(monkeypatch):
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader = _bruger_loader(BRUGERE, noegletabel={"Navn (az12345)": "az123456"})
+    assert loader._ansvarlig({"ansvarlig_go": "Navn (az12345)", "kilde_noegle": "K"}) == "41"
+
+
+def test_az_der_ikke_findes_proever_noegletabellen(monkeypatch):
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader = _bruger_loader(BRUGERE, noegletabel={"Navn (az99999)": "az12345"})
+    assert loader._ansvarlig({"ansvarlig_go": "Navn (az99999)", "kilde_noegle": "K"}) == "41"
+
+
+def test_ukendt_sagsbehandler_giver_systemkonto_og_advarsel(monkeypatch):
+    monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
+    loader = _bruger_loader(BRUGERE, noegletabel={"Jakob Thomsen": "az12345"})
+    assert loader._ansvarlig({"ansvarlig_go": "Ukendt Person", "kilde_noegle": "K"}) == "542"
+    assert len(loader.afviste) == 1
+    assert "sagsbehandler_ukendt" in loader.afviste[0] and "advarsel" in loader.afviste[0]
 
 
 def test_tvungen_sagsbehandler_vinder_over_alt(monkeypatch):
@@ -714,3 +741,32 @@ def test_kommentar_der_kom_med_ved_oprettelsen_giver_ingen_put():
     assert [(k["metode"], k["sti"]) for k in klient.log][-2:] == [
         ("POST", "/api/sag/template"), ("GET", "/api/sag/1001")]
     assert not afviste
+
+
+def test_dokumentets_opretter_bruger_ogsaa_noegletabellen():
+    loader, kald = _forfatter_loader([{"Id": 4711, "LogonId": "az12345"}])
+    loader.k.db = SimpleNamespace(hent_alle=lambda _sql, *_p: [
+        {"go_feltvaerdi": "Jakob Thomsen", "vaerdimulighed_external_key": "az12345"}])
+    assert loader._forfatter({"forfatter_go": "Jakob Thomsen", "kilde_noegle": "1"}) == "4711"
+
+
+def test_sagsbehandler_noegle_raekker_kun_afklarede():
+    from konvertering import sagsbehandlere as sb
+    gennemsyn = [
+        {"go_vaerdi": "Jakob Thomsen", "foreslaaet_az": "az12345", "foreslaaet_navn": "Jakob T",
+         "status": "auto", "godkendt": "", "rettet_vaerdi": ""},
+        {"go_vaerdi": "Jakob Hansen Thomsen", "foreslaaet_az": "az12345",
+         "foreslaaet_navn": "Jakob T", "status": "forslag", "godkendt": "x", "rettet_vaerdi": ""},
+        {"go_vaerdi": "J. Thomsen", "foreslaaet_az": "", "foreslaaet_navn": sb.UKENDT_BRUGER,
+         "status": "afklar", "godkendt": "", "rettet_vaerdi": ""},
+        {"go_vaerdi": "Anne", "foreslaaet_az": "az11111", "foreslaaet_navn": "Anne A",
+         "status": "afklar", "godkendt": "", "rettet_vaerdi": "az22222"},
+    ]
+    raekker, udeladt = sb.noegle_raekker(gennemsyn)
+    assert udeladt == 1
+    assert [(r["go_feltvaerdi"], r["vaerdimulighed_external_key"], r["vaerdimulighed_navn"])
+            for r in raekker] == [("Jakob Thomsen", "az12345", "Jakob T"),
+                                  ("Jakob Hansen Thomsen", "az12345", "Jakob T"),
+                                  ("Anne", "az22222", "az22222")]
+    assert {r["vaerdiliste_external_key"] for r in raekker} == {"v_bruger_ppr"}
+    assert {r["status"] for r in raekker} == {"klar"}

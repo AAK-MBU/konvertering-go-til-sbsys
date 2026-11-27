@@ -534,15 +534,23 @@ MULIGHED_KOLONNER = ["liste", "go_feltnavn", "go_feltvaerdi", "vaerdiliste_exter
                      "status", "kommentar"]
 
 
-def gem_i_db(db: Any, muligheder: list[dict[str, str]], kilde: str) -> int:
-    """Erstat map.vaerdilistemulighed med ``muligheder`` i ÉN transaktion.
+def gem_i_db(db: Any, muligheder: list[dict[str, str]], kilde: str,
+             lister: list[str] | None = None) -> int:
+    """Erstat ``lister``' rækker i map.vaerdilistemulighed med ``muligheder``,
+    i ÉN transaktion. Andre lister røres ikke: `vaerdier mapning` og
+    `vaerdier sagsbehandlere-gem` skriver hver sine (27-11-2026).
 
-    Slår indsættelsen fejl (fx en dublet), rulles sletningen også tilbage,
-    så tabellen aldrig står halvt fyldt."""
+    ``lister`` er som standard dem der står i ``muligheder``. Slår
+    indsættelsen fejl (fx en dublet), rulles sletningen også tilbage, så
+    tabellen aldrig står halvt fyldt."""
+    lister = sorted(set(lister if lister is not None else (m["liste"] for m in muligheder)))
+    if not lister:
+        return 0
     sql = (f"INSERT INTO map.vaerdilistemulighed ({', '.join(MULIGHED_KOLONNER)}, kilde) "
            f"VALUES ({', '.join('?' * (len(MULIGHED_KOLONNER) + 1))})")
     with db.transaktion() as markoer:
-        markoer.execute("DELETE FROM map.vaerdilistemulighed")
+        markoer.execute("DELETE FROM map.vaerdilistemulighed WHERE liste IN ("
+                        + ", ".join("?" * len(lister)) + ")", *lister)
         for m in muligheder:
             markoer.execute(sql, *[m[k] or None if k == "kommentar" else m[k]
                                    for k in MULIGHED_KOLONNER], kilde)

@@ -109,8 +109,8 @@ class DokumentLoader(Loader[Dokument]):
 
         0. ``TEST_SAGSBEHANDLER_AZ`` i .env tvinger den bruger på alle
            dokumenter, som på sagerne. Kun til test; der advares.
-        1. En række i mapping/bruger.csv (GO-værdi -> SBSYS-id).
-        2. AZ-identen i GO-værdien, slået op i SBSYS (samme som sagsbehandleren).
+        1. AZ-identen i GO-værdien, ellers GO-værdien slået op i nøgletabellen
+           (sagsbehandlere-gennemsynet) — præcis som sagsbehandleren.
 
         Ellers sendes intet, og SBSYS skriver konverteringens konto — fx for
         "Systemkonto (Inaktiv)" og fratrådte uden en SBSYS-bruger. Kladder kan
@@ -131,13 +131,7 @@ class DokumentLoader(Loader[Dokument]):
                     regel="opretter_ikke_i_sbsys", felt="forfatter")
             return str(bruger_id)
         go = raekke.get("forfatter_go")
-        mappet = self.k.kodelister.slaa_op("bruger", go, paakraevet=False)
-        if mappet:
-            return mappet
-        az = find_az(go)
-        if az is None:
-            return None
-        bruger_id = self._brugere.bruger_id(az)
+        bruger_id = self._brugere.find_bruger(go)
         if bruger_id is None:
             log.warning("Dokument %s: opretteren fra GO findes ikke som bruger i SBSYS",
                         kort_noegle(str(raekke.get("kilde_noegle"))))

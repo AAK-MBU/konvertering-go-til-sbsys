@@ -21,6 +21,13 @@ def logon(vaerdi: str) -> str:
     return vaerdi.strip().split("\\")[-1].split("@")[0].casefold()
 
 
+# Nøgletabellen (map.vaerdilistemulighed) fyldes af `konv vaerdier
+# sagsbehandlere-gem` fra det gennemgåede sagsbehandlere-gennemsyn: én række
+# pr. GO-stavemåde med den AZ-ident den er afklaret til. Uafklarede står der
+# ikke — de ender på MBU-systemkontoen (besluttet 27-11-2026).
+NOEGLETABEL_SAGSBEHANDLER = "sagsbehandler"
+
+
 class BrugerOpslag:
     """Søger brugeren i SBSYS på LogonId. Kun ét PRÆCIST træf tæller —
     søger SBSYS bredere end på identen, filtreres det fra her. Svaret
@@ -30,6 +37,37 @@ class BrugerOpslag:
         self.k = k
         self._cache: dict[str, int | None] = {}
         self._systemkonto: int | None = None
+        self._noegletabel: dict[str, str] | None = None
+
+    def noegletabel(self) -> dict[str, str]:
+        """GO-stavemåde -> AZ-ident fra nøgletabellen. Læses én gang pr. kørsel.
+        Uden database (eller tabel) er den tom — så gælder AZ og systemkontoen."""
+        if self._noegletabel is None:
+            db = getattr(self.k, "db", None)
+            raekker = []
+            if db is not None and hasattr(db, "hent_alle"):
+                raekker = db.hent_alle(
+                    "SELECT go_feltvaerdi, vaerdimulighed_external_key "
+                    "FROM map.vaerdilistemulighed WHERE liste = ?", NOEGLETABEL_SAGSBEHANDLER)
+            self._noegletabel = {
+                str(r["go_feltvaerdi"]).strip(): str(r["vaerdimulighed_external_key"]).strip()
+                for r in raekker if r.get("go_feltvaerdi") and r.get("vaerdimulighed_external_key")}
+        return self._noegletabel
+
+    def find_bruger(self, go: str | None) -> int | None:
+        """GO's sagsbehandler/opretter -> SBSYS-bruger-id (besluttet 27-11-2026):
+
+        1. AZ-identen i selve GO-værdien, hvis den findes som bruger i SBSYS.
+        2. Ellers GO-værdien slået op i nøgletabellen -> AZ-ident -> SBSYS.
+        3. Ellers None: den kaldende bestemmer (sager: MBU-systemkontoen).
+        """
+        tekst = (go or "").strip()
+        if not tekst:
+            return None
+        if (az := find_az(tekst)) and (bruger_id := self.bruger_id(az)) is not None:
+            return bruger_id
+        az = self.noegletabel().get(tekst)
+        return self.bruger_id(az) if az else None
 
     def bruger_id(self, az: str) -> int | None:
         noegle = logon(az)

@@ -440,6 +440,47 @@ def endelig_az(r: dict[str, str]) -> str | None:
     return None
 
 
+VAERDILISTE_NOEGLE = "v_bruger_ppr"   # LIS' sagsbehandler-værdiliste (27-11-2026)
+GO_FELTNAVN = "Sagsbehandler"
+
+
+def noegle_raekker(gennemsyn: list[dict[str, str]]) -> tuple[list[dict[str, str]], int]:
+    """Rækker til map.vaerdilistemulighed fra det GENNEMGÅEDE gennemsyn.
+
+    Én række pr. GO-stavemåde der er afklaret til en AZ-ident (auto,
+    godkendt forslag eller rettet_vaerdi). Flere stavemåder af samme person
+    får samme nøgle (AZ-identen). Tabellen er både LIS' liste over hvilke
+    værdier der skal findes i v_bruger_ppr, og konverteringens opslag
+    stavemåde -> AZ. Uafklarede kommer IKKE med: de ender på
+    MBU-systemkontoen (besluttet 27-11-2026).
+
+    Returnerer (rækker, antal udeladte)."""
+    ud: list[dict[str, str]] = []
+    udeladt = 0
+    set_go: set[str] = set()
+    for r in gennemsyn:
+        az = find_az(endelig_az(r) or "")
+        go = r["go_vaerdi"].strip()
+        if not az or go in set_go:
+            udeladt += not az
+            continue
+        set_go.add(go)
+        foreslaaet = (r.get("foreslaaet_az") or "").strip().casefold()
+        navn = (r.get("foreslaaet_navn") or "").strip() if foreslaaet == az else ""
+        ud.append({
+            "liste": LISTE,
+            "go_feltnavn": GO_FELTNAVN,
+            "go_feltvaerdi": go,
+            "vaerdiliste_external_key": VAERDILISTE_NOEGLE,
+            "vaerdimulighed_external_key": az,
+            "vaerdimulighed_navn": navn or az,
+            "noegletype": "az",
+            "status": "klar",
+            "kommentar": "" if navn else "Rettet til en anden AZ-ident - navnet står ikke i gennemsynet",
+        })
+    return ud, udeladt
+
+
 def endelig_vaerdi(r: dict[str, str]) -> str:
     """Det GO-værdien ender som: en AZ-ident, ellers UKENDT_BRUGER."""
     return endelig_az(r) or UKENDT_BRUGER

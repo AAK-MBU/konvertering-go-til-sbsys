@@ -516,6 +516,12 @@ def _parser() -> argparse.ArgumentParser:
                            "Aldrig i repoet (persondata)")
     v_sb.add_argument("--overskriv", action="store_true")
 
+    v_sbg = v_under.add_parser(
+        "sagsbehandlere-gem",
+        help="Gem det GENNEMGÅEDE sagsbehandlere-gennemsyn i nøgletabellen "
+             "(map.vaerdilistemulighed): GO-stavemåde -> AZ-ident")
+    v_sbg.add_argument("fil", type=Path, help="Det gennemgåede sagsbehandlere-gennemsyn.xlsx")
+
     spec = under.add_parser(
         "spec", help="Læs SBSYS' egen OpenAPI-beskrivelse — stier, felter, nøglekandidater")
     spec.add_argument("hvad", choices=["stier", "noegle", "felt", "model", "soegning", "gem"],
@@ -557,6 +563,8 @@ def main(argv: list[str] | None = None) -> int:
             return _vaerdier_mapning(args)
         if args.vaerdier_kommando == "sagsbehandlere":
             return _vaerdier_sagsbehandlere(args)
+        if args.vaerdier_kommando == "sagsbehandlere-gem":
+            return _vaerdier_sagsbehandlere_gem(args)
         return _vaerdier_saml(args)
 
     try:
@@ -821,7 +829,8 @@ def _vaerdier_mapning(args: argparse.Namespace) -> int:
             return 1
         db = Database(Settings.fra_environment().db)
         try:
-            antal = vm.gem_i_db(db, muligheder, args.fil.name)
+            antal = vm.gem_i_db(db, muligheder, args.fil.name,
+                                lister=sorted({v.liste for v in valg}))
         finally:
             db.luk()
         print(f"  gemt i db:     map.vaerdilistemulighed ({antal} rækker, erstattet)")
@@ -871,6 +880,31 @@ def _hent_sbsys_lister(lister: list[str]) -> dict[str, object]:
     finally:
         kontekst.klient.luk()
     return ud
+
+
+def _vaerdier_sagsbehandlere_gem(args: argparse.Namespace) -> int:
+    """Persondata: kun ANTAL i terminalen — ingen navne, ingen AZ-identer."""
+    from . import sagsbehandlere as sb
+    from . import vaerdimapning as vm
+
+    if not args.fil.exists():
+        print(f"Findes ikke: {args.fil}", file=sys.stderr)
+        return 2
+    try:
+        raekker, udeladt = sb.noegle_raekker(sb.laes_gennemsyn(args.fil))
+    except ValueError as e:
+        print(f"Intet gemt. {e}", file=sys.stderr)
+        return 1
+    db = Database(Settings.fra_environment().db)
+    try:
+        antal = vm.gem_i_db(db, raekker, args.fil.name, lister=[sb.LISTE])
+    finally:
+        db.luk()
+    personer = len({r["vaerdimulighed_external_key"] for r in raekker})
+    print(f"Gemt i map.vaerdilistemulighed (liste '{sb.LISTE}', erstattet): "
+          f"{antal} GO-stavemåder -> {personer} personer (AZ-identer).")
+    print(f"Udeladt (ikke afklaret til en AZ-ident -> MBU-systemkontoen): {udeladt}.")
+    return 0
 
 
 def _vaerdier_sagsbehandlere(args: argparse.Namespace) -> int:

@@ -353,7 +353,8 @@ def test_gem_i_db_erstatter_alt_i_en_transaktion():
     assert vm.gem_i_db(Db(), [m, m | {"go_feltvaerdi": "Spiren [178]"}], "g.xlsx") == 2
     kald = Db.markoer.kald
     assert Db.transaktioner == 1
-    assert kald[0][0] == "DELETE FROM map.vaerdilistemulighed"
+    assert kald[0] == ("DELETE FROM map.vaerdilistemulighed WHERE liste IN (?)",
+                       ("institution",)), "kun egne lister erstattes"
     assert [k[0].startswith("INSERT INTO map.vaerdilistemulighed") for k in kald[1:]] == [True] * 2
     # kommentar "" -> NULL, kilde til sidst
     assert kald[1][1][-2:] == (None, "g.xlsx")

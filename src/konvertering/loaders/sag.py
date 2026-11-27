@@ -17,7 +17,7 @@ from ..sbsys.errors import (
     ValideringsFejl,
 )
 from .base import Loader, boelge_filter
-from .brugere import BrugerOpslag, find_az
+from .brugere import BrugerOpslag
 
 TOM_AFDELING = "<tom>"
 # Tvinger ÉN sagsbehandler (AZ-ident) på alle sager. Kun til test: PPR-sager
@@ -372,13 +372,13 @@ class SagLoader(Loader[Sag]):
 
         1. ``TEST_SAGSBEHANDLER_AZ`` i .env tvinger én behandler på alle
            sager. Kun til test; der advares ved hver kørsel.
-        2. En række i mapping/bruger.csv (GO-login -> SBSYS-id).
-        3. GO's egen sagsbehandler, slået op i SBSYS på AZ-identen. Samme
-           AD-identitet i begge systemer — ikke et gæt.
-
+        2. AZ-identen i GO's værdi, slået op i SBSYS (samme AD-identitet).
+        3. GO's værdi slået op i nøgletabellen (sagsbehandlere-gennemsynet:
+           stavemåde -> AZ-ident), og AZ-identen slået op i SBSYS.
         4. Ellers MBU-systemkontoen (den konto konverteringen kører som) —
-           besluttet 26-11-2026. Så afviser SBSYS aldrig en beskyttet sag
-           for manglende behandler.
+           besluttet 26-11-2026 — og en advarsel i konv.afvist
+           (regel 'sagsbehandler_ukendt'), så de kan findes igen. Så afviser
+           SBSYS aldrig en beskyttet sag for manglende behandler.
         """
         tvungen = os.environ.get(TVUNGEN_SAGSBEHANDLER, "").strip()
         if tvungen:
@@ -395,18 +395,18 @@ class SagLoader(Loader[Sag]):
             return str(bruger_id)
 
         go = raekke.get("ansvarlig_go")
-        mappet = self.k.kodelister.slaa_op("bruger", go, paakraevet=False)
-        if mappet:
-            return mappet
-        az = find_az(go)
-        if az:
-            bruger_id = self._bruger_id(az)
-            if bruger_id is not None:
-                return str(bruger_id)
+        bruger_id = self._brugere.find_bruger(go)
+        if bruger_id is not None:
+            return str(bruger_id)
         # 4. Ingen SBSYS-bruger: MBU-systemkontoen (besluttet 26-11-2026).
+        noegle = str(raekke.get("kilde_noegle"))
         log.warning("Sag %s: GO's sagsbehandler kan ikke kobles til en SBSYS-bruger "
-                    "- sagen får MBU-systemkontoen",
-                    kort_noegle(str(raekke.get("kilde_noegle"))))
+                    "- sagen får MBU-systemkontoen", kort_noegle(noegle))
+        if getattr(self.k, "db", None) is not None:
+            self._afvis(noegle, "sagsbehandler_ukendt", "advarsel",
+                        "GO's sagsbehandler kunne ikke kobles til en SBSYS-bruger "
+                        "(hverken AZ-ident eller nøgletabel) - MBU-systemkontoen er brugt",
+                        felt="ansvarlig", vaerdi=None)
         return str(self._brugere.systemkonto())
 
     def _bruger_id(self, az: str) -> int | None:
