@@ -57,7 +57,7 @@ def sagskommentar(go_sagsnummer: str | None, startdato: Any) -> str | None:
     SBSYS' egne datofelter — Opstaaet og Oprettet ignoreres af API'et."""
     linjer = [str(go_sagsnummer).strip()] if go_sagsnummer and str(go_sagsnummer).strip() else []
     if hasattr(startdato, "strftime"):
-        linjer.append(f"Startdato i GO: {startdato.strftime('%d-%m-%Y')}")
+        linjer.append(f"Oprettelsesdato i GO: {startdato.strftime('%d-%m-%Y')}")
     return "\n".join(linjer) or None
 
 

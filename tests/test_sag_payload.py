@@ -672,7 +672,7 @@ def test_sagskommentar_er_sagsid_og_startdato_under():
 
     from konvertering.loaders.sag import sagskommentar
     assert sagskommentar("PPR-2026-000134-002", datetime(2015, 3, 1)) == (
-        "PPR-2026-000134-002\nStartdato i GO: 01-03-2015")
+        "PPR-2026-000134-002\nOprettelsesdato i GO: 01-03-2015")
     assert sagskommentar("PPR-2026-000134-002", None) == "PPR-2026-000134-002"
     assert sagskommentar(None, None) is None
 
@@ -691,7 +691,7 @@ def test_kommentar_saettes_med_hel_sag_foer_status():
                          ("PUT", "/api/sag/1001"), ("PUT", "/api/sag/1001/status")]
     put = next(k for k in klient.log if k["metode"] == "PUT" and k["sti"] == "/api/sag/1001")
     assert put["json"] == {"Id": 1001, "SagsTitel": "t",
-                           "Kommentar": "PPR-2026-000134-002\nStartdato i GO: 01-03-2015"}
+                           "Kommentar": "PPR-2026-000134-002\nOprettelsesdato i GO: 01-03-2015"}
     assert not afviste
 
 
@@ -704,7 +704,7 @@ def test_kommentar_der_kom_med_ved_oprettelsen_giver_ingen_put():
         if metode == "GET" and sti == "/api/sag/1001":
             klient.log.append({"metode": metode, "sti": sti, **kw})
             return SimpleNamespace(status=200, korrelations_id="k", krop={
-                "Id": 1001, "Kommentar": "PPR-2026-000134-002\r\nStartdato i GO: 01-03-2015"})
+                "Id": 1001, "Kommentar": "PPR-2026-000134-002\r\nOprettelsesdato i GO: 01-03-2015"})
         return original(metode, sti, **kw)
 
     klient.kald = kald
