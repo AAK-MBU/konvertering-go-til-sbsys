@@ -50,6 +50,11 @@ class Klient:
                 raise PermanentFejl("opdater_sagsstatus: HTTP 400 — kommentar påkrævet",
                                     http_status=400)
             return SimpleNamespace(status=200, krop={}, korrelations_id="k")
+        if sti == "/api/sag/1001":
+            if metode == "GET":
+                return SimpleNamespace(status=200, korrelations_id="k",
+                                       krop={"Id": 1001, "SagsTitel": "t", "Kommentar": None})
+            return SimpleNamespace(status=200, korrelations_id="k", krop={})
         if sti.endswith("/sag/template"):
             return SimpleNamespace(
                 status=200, korrelations_id="k",
@@ -610,3 +615,102 @@ def test_sag_med_az_i_navnet_finder_brugeren(monkeypatch):
     monkeypatch.delenv("TEST_SAGSBEHANDLER_AZ", raising=False)
     loader, _ = _sagloader_med_brugere([{"Id": 4711, "LogonId": "AAK\\az12345"}])
     assert loader._ansvarlig({"ansvarlig_go": "Anna Test (AZ12345)", "kilde_noegle": "S"}) == "4711"
+
+
+# --- emne- og borgersager (27-11-2026) ----------------------------------------
+
+def test_emnesag_uden_part_sendes_uden_part():
+    loader, _ = _loader(Klient())
+    p = loader.payload(_sag(primaer_part_noegle=None, part_valgfri=True))
+    assert "PrimaryPart" not in p and "Parts" not in p
+
+
+def test_borgersag_uden_part_afvises_stadig():
+    from konvertering.sbsys.errors import ValideringsFejl
+    loader, _ = _loader(Klient())
+    with pytest.raises(ValideringsFejl):
+        loader.payload(_sag(primaer_part_noegle=None, part_valgfri=False))
+
+
+def test_emnesag_med_part_sender_parten():
+    loader, _ = _loader(Klient())
+    p = loader.payload(_sag(part_valgfri=True))
+    assert p["PrimaryPart"] == {"PartId": 7, "PartType": "Person"}
+
+
+@pytest.mark.parametrize("org, valgfri", [("EMN", True), ("BOR", False), ("PPR", False)])
+def test_kun_emnesager_maa_mangle_part(org, valgfri):
+    from konvertering.loaders.sag import PART_VALGFRI, organisering
+    assert (organisering({"organisering_go": org.lower()}) in PART_VALGFRI) is valgfri
+
+
+def test_skabelon_noegle_bruger_organisering_naar_raekken_findes():
+    from konvertering.loaders.sag import skabelon_noegle
+    from konvertering.mapping import Kodelister, Opslag
+    k = Kodelister({("sagsskabelon", "MBU DT Klage"): Opslag(None, "bloker"),
+                    ("sagsskabelon", "MBU DT Klage|BOR"): Opslag("38", "map"),
+                    ("sagsskabelon", "MBU SK Afgørelse"): Opslag("40", "map")})
+    r = {"sagstype_go": "MBU DT Klage", "organisering_go": "BOR"}
+    assert skabelon_noegle(r, k) == "MBU DT Klage|BOR"
+    assert k.slaa_op("sagsskabelon", skabelon_noegle(r, k)) == "38"
+    # ELM har ingen egen række -> den blokerede række gælder
+    assert skabelon_noegle({**r, "organisering_go": "ELM"}, k) == "MBU DT Klage"
+    assert skabelon_noegle({"sagstype_go": "MBU SK Afgørelse", "organisering_go": "BOR"},
+                           k) == "MBU SK Afgørelse"
+
+
+def test_ppr_emne_og_borgersager_sender_ikke_ansaettelsessted():
+    """SBSYS sætter det selv ud fra sagsbehandleren (set i prod 27-11-2026)."""
+    from konvertering.loaders.sag import ARVER_ANSAETTELSESSTED
+    assert {"PPR", "EMN", "BOR"} == ARVER_ANSAETTELSESSTED
+    loader, _ = _loader(Klient())
+    assert "Ansaettelsessted" not in loader.payload(_sag(afdeling=None))
+
+
+def test_sagskommentar_er_sagsid_og_startdato_under():
+    from datetime import datetime
+
+    from konvertering.loaders.sag import sagskommentar
+    assert sagskommentar("PPR-2026-000134-002", datetime(2015, 3, 1)) == (
+        "PPR-2026-000134-002\nStartdato i GO: 01-03-2015")
+    assert sagskommentar("PPR-2026-000134-002", None) == "PPR-2026-000134-002"
+    assert sagskommentar(None, None) is None
+
+
+def test_kommentar_saettes_med_hel_sag_foer_status():
+    from datetime import datetime
+    klient = Klient()
+    loader, afviste = _loader(klient)
+    s = _sag(go_sagsnummer="PPR-2026-000134-002", oprettet_dato=datetime(2015, 3, 1))
+    p = loader.payload(s)
+    assert p[EFTER_OPRETTELSE]["kommentar"].startswith("PPR-2026-000134-002\n")
+    assert p["Kommentar"] == p[EFTER_OPRETTELSE]["kommentar"], "forsøg: med i oprettelsen"
+    loader.send(s, p)
+    kald = [(k["metode"], k["sti"]) for k in klient.log]
+    assert kald[-4:] == [("POST", "/api/sag/template"), ("GET", "/api/sag/1001"),
+                         ("PUT", "/api/sag/1001"), ("PUT", "/api/sag/1001/status")]
+    put = next(k for k in klient.log if k["metode"] == "PUT" and k["sti"] == "/api/sag/1001")
+    assert put["json"] == {"Id": 1001, "SagsTitel": "t",
+                           "Kommentar": "PPR-2026-000134-002\nStartdato i GO: 01-03-2015"}
+    assert not afviste
+
+
+def test_kommentar_der_kom_med_ved_oprettelsen_giver_ingen_put():
+    from datetime import datetime
+    klient = Klient()
+    original = klient.kald
+
+    def kald(metode, sti, **kw):
+        if metode == "GET" and sti == "/api/sag/1001":
+            klient.log.append({"metode": metode, "sti": sti, **kw})
+            return SimpleNamespace(status=200, korrelations_id="k", krop={
+                "Id": 1001, "Kommentar": "PPR-2026-000134-002\r\nStartdato i GO: 01-03-2015"})
+        return original(metode, sti, **kw)
+
+    klient.kald = kald
+    loader, afviste = _loader(klient)
+    s = _sag(go_sagsnummer="PPR-2026-000134-002", oprettet_dato=datetime(2015, 3, 1), status=None)
+    loader.send(s, loader.payload(s))
+    assert [(k["metode"], k["sti"]) for k in klient.log][-2:] == [
+        ("POST", "/api/sag/template"), ("GET", "/api/sag/1001")]
+    assert not afviste

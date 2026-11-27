@@ -251,7 +251,7 @@ def test_sag_uden_part_afvises_og_stopper_ikke_boelgen():
 
     kilde = inspect.getsource(sag.SagLoader._part_reference)
     assert "ValideringsFejl" in kilde
-    assert "A16" in kilde
+    assert "mangler_part" in kilde
 
 
 # --- journalnotater ---------------------------------------------------

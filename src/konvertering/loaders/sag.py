@@ -42,6 +42,49 @@ def afdeling_noegle(raekke: dict[str, Any]) -> str:
 
 log = logging.getLogger(__name__)
 
+# Organiseringer hvor ansættelsesstedet IKKE sendes: SBSYS sætter det selv ud
+# fra sagsbehandleren (set i prod 27-11-2026: et skift af sagsbehandler på en
+# PPR-sag skiftede ansættelsesstedet med). Gælder også PPR fra 27-11-2026.
+ARVER_ANSAETTELSESSTED = frozenset({"PPR", "EMN", "BOR"})
+# Organiseringer hvor en sag uden part er i orden: emnesagernes skabeloner
+# kræver ingen part (PartForlangAltid = False, prod 27-11-2026).
+PART_VALGFRI = frozenset({"EMN"})
+
+
+def sagskommentar(go_sagsnummer: str | None, startdato: Any) -> str | None:
+    """Sagens Kommentar i SBSYS: GO's sags-id og, under det, GO's startdato
+    (besluttet 27-11-2026, alle sagstyper). Startdatoen kan ikke sættes i
+    SBSYS' egne datofelter — Opstaaet og Oprettet ignoreres af API'et."""
+    linjer = [str(go_sagsnummer).strip()] if go_sagsnummer and str(go_sagsnummer).strip() else []
+    if hasattr(startdato, "strftime"):
+        linjer.append(f"Startdato i GO: {startdato.strftime('%d-%m-%Y')}")
+    return "\n".join(linjer) or None
+
+
+def _samme_tekst(a: Any, b: str) -> bool:
+    """Ens tekst, når linjeskift (\\r\\n / \\n) og kantmellemrum ses bort fra."""
+    def norm(t: Any) -> str:
+        return "\n".join(linje.strip() for linje in str(t or "").strip().splitlines())
+    return norm(a) == norm(b)
+
+
+def organisering(raekke: dict[str, Any]) -> str:
+    return (raekke.get("organisering_go") or "").strip().upper()
+
+
+def skabelon_noegle(raekke: dict[str, Any], kodelister: Any) -> str | None:
+    """Nøglen i kodelisten ``sagsskabelon``: ``<sagsprofil>|<organisering>``
+    hvis den række findes, ellers sagsprofilen alene.
+
+    Nogle sagsprofiler bruges både som borger- og emnesag (fx "MBU DT Klage")
+    og har en skabelon for hver. De står som "MBU DT Klage|BOR" og
+    "MBU DT Klage|EMN"; alle andre som profilen alene."""
+    profil = (raekke.get("sagstype_go") or "").strip()
+    if not profil:
+        return None
+    saerlig = f"{profil}|{organisering(raekke)}"
+    return saerlig if kodelister.findes("sagsskabelon", saerlig) else profil
+
 
 def sagstitel(raekke: dict[str, Any]) -> str:
     """PPR-sager får sagsprofilen som titel (Psykolog, ABA ...), uanset hvad
@@ -92,18 +135,20 @@ class SagLoader(Loader[Sag]):
             facet=None,
             sagstype=m.slaa_op("sagstype", raekke.get("sagstype_go"), paakraevet=False),
             # Skabelonen er blokerende: SBSYS kan ikke oprette en sag uden.
-            skabelon=m.slaa_op("sagsskabelon", raekke.get("sagstype_go"), paakraevet=True),
+            skabelon=m.slaa_op("sagsskabelon", skabelon_noegle(raekke, m), paakraevet=True),
             status=m.slaa_op("sagsstatus", raekke.get("status_go"), paakraevet=False),
             # Ukendt sagsbehandler er ikke blokerende: sager fra medarbejdere
             # der er fratrådt skal stadig med over. De havner på en fælles
             # konto via 'standard'-handlingen i kodelisten.
             ansvarlig=self._ansvarlig(raekke),
-            afdeling=m.slaa_op("afdeling", afdeling_noegle(raekke), paakraevet=True),
+            afdeling=(None if organisering(raekke) in ARVER_ANSAETTELSESSTED
+                      else m.slaa_op("afdeling", afdeling_noegle(raekke), paakraevet=True)),
             oprettet_dato=raekke.get("oprettet_dato"),
             afsluttet_dato=raekke.get("afsluttet_dato"),
             fortrolighed=m.slaa_op("fortrolighed", raekke.get("fortrolighed_go"), paakraevet=False),
             bevaring=m.slaa_op("bevaring", raekke.get("bevaring_go"), paakraevet=False),
             primaer_part_noegle=raekke.get("primaer_part_noegle"),
+            part_valgfri=organisering(raekke) in PART_VALGFRI,
         )
 
     def payload(self, objekt: Sag) -> dict[str, Any]:
@@ -140,21 +185,31 @@ class SagLoader(Loader[Sag]):
         # dry-run: ellers viser --vis-payload en payload der ikke er den der
         # sendes, og så er gennemsynet før første rigtige kald værdiløst.
         # Opslaget er read-only.
-        part = self._part_reference(objekt)
-        krop[e.felt("sag", "primaer_part")] = part
-        krop[e.felt("sag", "parter")] = [part]
+        if objekt.primaer_part_noegle or not objekt.part_valgfri:
+            part = self._part_reference(objekt)
+            krop[e.felt("sag", "primaer_part")] = part
+            krop[e.felt("sag", "parter")] = [part]
 
+        efter: dict[str, Any] = {}
+        # Sagens Kommentar står ikke på CreateSagFromSkabelonDto i spec'en,
+        # kun på SagDtoV10 (PUT /api/sag/{id}). FORSØG (27-11-2026): den sendes
+        # alligevel med i oprettelsen. Tager SBSYS imod den, springer
+        # _saet_kommentar PUT'en over og logger det; ellers sætter PUT'en den.
+        kommentar = sagskommentar(objekt.go_sagsnummer, objekt.oprettet_dato)
+        if kommentar:
+            krop["Kommentar"] = kommentar
+            efter["kommentar"] = kommentar
         if objekt.status:
             # Kommentaren sendes altid: en status kan have RequireComments
             # (SagsStatusDto), og saa afviser SBSYS skiftet uden. Passiv er
             # en oplagt kandidat. Teksten er ikke en GO-noegle — den siger
             # kun hvorfor statussen blev sat, i sagens statushistorik.
-            krop[EFTER_OPRETTELSE] = {
-                "status": e.byg_payload("sagsstatus", {
-                    "status": objekt.status,
-                    "kommentar": STATUSKOMMENTAR,
-                }),
-            }
+            efter["status"] = e.byg_payload("sagsstatus", {
+                "status": objekt.status,
+                "kommentar": STATUSKOMMENTAR,
+            })
+        if efter:
+            krop[EFTER_OPRETTELSE] = efter
         return krop
 
     def send(self, objekt: Sag, payload: dict[str, Any]) -> tuple[str, str | None]:
@@ -188,11 +243,52 @@ class SagLoader(Loader[Sag]):
             nummer = krop.get("Nummer") if isinstance(krop, dict) else None
             sbsys_nummer = nummer if isinstance(nummer, str) else None
 
-        # Status saettes OGSAA paa en genfundet sag: var den oprettet, men
-        # svaret tabt, naaede statussen aldrig at blive sat.
+        # Kommentar og status saettes OGSAA paa en genfundet sag: var den
+        # oprettet, men svaret tabt, naaede de aldrig at blive sat.
+        # Kommentaren foerst: en lukket status kan spaerre for redigering.
+        if efter.get("kommentar"):
+            self._saet_kommentar(objekt, sbsys_id, efter["kommentar"])
         if efter.get("status"):
             self._saet_status(objekt, sbsys_id, efter["status"])
         return sbsys_id, sbsys_nummer
+
+    def _saet_kommentar(self, objekt: Sag, sbsys_id: str, kommentar: str) -> None:
+        """GET /api/sag/{id}, saet Kommentar, PUT hele sagen tilbage.
+
+        PUT'en kraever hele SagDtoV10 (prøvet i prod 26-11-2026). Fejler
+        det, afvises sagen IKKE — samme grund som ved status: sagen findes,
+        og en dublet er vaerre end en manglende kommentar. Advarsel i
+        konv.afvist (regel 'kommentar_ikke_sat')."""
+        e = self.k.endpoints
+        kontekst = {"objekt_type": "sag", "kilde_noegle": objekt.kilde_noegle}
+        try:
+            hent = e.operation("hent_sag", sag_id=sbsys_id)
+            sag = self.k.klient.kald(hent.metode, hent.sti, operation="hent_sag",
+                                     forventede_status=hent.forventede_status,
+                                     kontekst=kontekst).krop
+            if not isinstance(sag, dict):
+                raise PermanentFejl("hent_sag: svaret er ikke en sag")
+            if _samme_tekst(sag.get("Kommentar"), kommentar):
+                log.info("Sag %s (id=%s): kommentaren kom med ved oprettelsen - ingen PUT",
+                         kort_noegle(objekt.kilde_noegle), sbsys_id)
+                return
+            log.info("Sag %s (id=%s): kommentaren kom IKKE med ved oprettelsen - saettes med PUT",
+                     kort_noegle(objekt.kilde_noegle), sbsys_id)
+            sag["Kommentar"] = kommentar
+            put = e.operation("opdater_sag", sag_id=sbsys_id)
+            self.k.klient.kald(put.metode, put.sti, operation="opdater_sag", json=sag,
+                               forventede_status=put.forventede_status, kontekst=kontekst)
+        except (VaertsnavnFejl, CertifikatFejl):
+            raise
+        except (PermanentFejl, ForbigaaendeFejl) as fejl:
+            log.warning("Sag %s oprettet (id=%s), men kommentaren kunne ikke saettes: %s",
+                        kort_noegle(objekt.kilde_noegle), sbsys_id, maskér(str(fejl)))
+            self._afvis(
+                objekt.kilde_noegle, "kommentar_ikke_sat", "advarsel",
+                f"Sagen er oprettet i SBSYS (id={sbsys_id}), men kommentaren blev ikke "
+                f"sat: {maskér(str(fejl))}",
+                felt="kommentar", vaerdi=objekt.go_sagsnummer,
+            )
 
     def _saet_status(self, objekt: Sag, sbsys_id: str, krop: dict[str, Any]) -> None:
         """PUT /api/sag/{id}/status. Fejler den, afvises sagen IKKE.
@@ -237,7 +333,7 @@ class SagLoader(Loader[Sag]):
         if not objekt.primaer_part_noegle:
             raise ValideringsFejl(
                 "Sagen har ingen primær part, og SBSYS' skabelon kræver en. "
-                "Hvad der skal ske med emnesager uden borger er spørgsmål A16.",
+                "Kun emnesager må oprettes uden part (27-11-2026).",
                 regel="mangler_part", felt="primaer_part_noegle",
             )
 

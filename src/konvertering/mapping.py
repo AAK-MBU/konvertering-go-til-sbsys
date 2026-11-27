@@ -88,6 +88,10 @@ class Kodelister:
             return None
         return post.sbsys_vaerdi
 
+    def findes(self, liste: str, go_vaerdi: str) -> bool:
+        """Har listen en række med netop denne GO-værdi (uanset handling)?"""
+        return (liste, go_vaerdi) in self._poster
+
     def poster_med_praefiks(self, liste: str, praefiks: str) -> dict[str, Opslag]:
         """Alle poster i listen hvis GO-værdi starter med præfikset —
         nøglet på resten af værdien. Til sammensatte nøgler som

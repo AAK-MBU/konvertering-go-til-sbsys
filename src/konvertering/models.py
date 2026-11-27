@@ -67,6 +67,8 @@ class Sag(KanoniskObjekt):
     fortrolighed: str | None = None
     bevaring: str | None = None
     primaer_part_noegle: str | None = None
+    # Uden part sendes sagen uden part (emnesager); ellers afvises den.
+    part_valgfri: bool = False
 
     @property
     def objekttype(self) -> Objekttype:
