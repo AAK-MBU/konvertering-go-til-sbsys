@@ -22,8 +22,8 @@ CREATE TABLE stg.sag (
     go_sagsnummer       NVARCHAR(100) NULL,
     titel               NVARCHAR(500) NOT NULL,
     beskrivelse         NVARCHAR(MAX) NULL,
-    kle_go              NVARCHAR(50)  NULL,
-    facet_go            NVARCHAR(50)  NULL,
+    kle_go              NVARCHAR(200) NULL,
+    facet_go            NVARCHAR(200) NULL,
     sagstype_go         NVARCHAR(100) NULL,
     status_go           NVARCHAR(100) NULL,
     ansvarlig_go        NVARCHAR(200) NULL,   -- login/UPN som det står i GO
@@ -49,6 +49,17 @@ GO
    eksisterende database ville ellers aldrig faa dem. */
 IF COL_LENGTH('stg.sag', 'organisering_go') IS NULL
     ALTER TABLE stg.sag ADD organisering_go NVARCHAR(50) NULL;
+GO
+
+/* KLE og facet udvidet til 200 (27-11-2026): en borgersag havde en KLE paa
+   76 tegn (tekst efter nummeret), og hele extracten fejlede med "String or
+   binary data would be truncated". Vaerdierne sendes ikke til SBSYS
+   (skabelonen saetter KLE og facet) — de staar kun til sporbarhed.
+   COL_LENGTH er i BYTES: NVARCHAR(200) = 400. */
+IF COL_LENGTH('stg.sag', 'kle_go') < 400
+    ALTER TABLE stg.sag ALTER COLUMN kle_go NVARCHAR(200) NULL;
+IF COL_LENGTH('stg.sag', 'facet_go') < 400
+    ALTER TABLE stg.sag ALTER COLUMN facet_go NVARCHAR(200) NULL;
 GO
 
 /* stg.dokument.er_kladde tilfoejes EFTER CREATE TABLE stg.dokument laengere
